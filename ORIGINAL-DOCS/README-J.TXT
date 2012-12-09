@@ -1,101 +1,131 @@
 ======================================================================
-        IP Messenger for Win �S�\�[�X ��舵��������    2004/09/08
+        IP Messenger for Win 全ソース 取り扱い説明書    2012/06/10
 
-                                               H.Shirouzu�i�����[�́j
-                                               shirouzu@h.email.ne.jp
+                                               H.Shirouzu（白水啓章）
+                                               http://ipmsg.org
 ======================================================================
 
-�ڎ�
+目次
 
-  1. �T�v
-  2. �g�p��̒���
-  3. �T�|�[�g�ɂ���
-  4. �R���p�C�����@�iVC++4.1J & VC6 �Łj
-  5. �f�B���N�g���\��
+  1. 概要
+  2. 使用上の注意
+  3. サポートについて
+  4. コンパイル方法（VC6 版）
+  5. ディレクトリ構成
+  6. 自己展開インストーラ形式について
+
+■ 1. 概要
+
+・IP Messenger for Win の全ソースコードです。
+
+・MFC/OWL を使用せず、オリジナルの簡易クラスを使っています。
+  簡易クラス部分は、tlib.h と t*.cpp になります。
+  小さなツール用に、流用できるかもしれません(^^;
+
+・VS2005以降 でビルドできます。
+
+・定義ない系のエラーがでる処理系[VC5等？]について。
+　ipmsg.h 内の #ifdef により、その定義（を含むブロック）が
+　無効化されているはずなので、未定義エラーの出る定義だけを
+　そのブロックから外に出すことで、コンパイル可能になります。
 
 
-�� 1. �T�v
+■ 2. 使用上の注意
 
-�EIP Messenger for Win �̑S�\�[�X�R�[�h�ł��B
+・「IP Messenger for Win」は実行ファイル・ソースコード共に
+  「永久に」フリーソフトウェアです。
 
-�EMFC/OWL ���g�p�����A�I���W�i���̊ȈՃN���X���g���Ă��܂��B
-  �ȈՃN���X�����́Atlib.h �� t*.cpp �ɂȂ�܂��B
-  �����ȃc�[���p�ɁA���p�ł��邩������܂���(^^;
+・アーカイブの転載・再配布は自由です。
 
-�EVC++4.1 �ŃR���p�C�����Ă��܂��B�iVC6 �ȍ~�ł��R���p�C���j
-
-�E��`�Ȃ��n�̃G���[���ł鏈���n[VC5���H]�ɂ��āB
-�@ipmsg.h ���� #ifdef �ɂ��A���̒�`�i���܂ރu���b�N�j��
-�@����������Ă���͂��Ȃ̂ŁA����`�G���[�̏o���`������
-�@���̃u���b�N����O�ɏo�����ƂŁA�R���p�C���\�ɂȂ�܂��B
-
-
-�� 2. �g�p��̒���
-
-�E�uIP Messenger for Win�v�͎��s�t�@�C���E�\�[�X�R�[�h����
-  �u�i�v�Ɂv�t���[�\�t�g�E�F�A�ł��B
-
-�E�A�[�J�C�u�̓]�ځE�Ĕz�z�͎��R�ł��B
-
-�E���C�Z���X�͈ȉ��̒ʂ�ł��B
+・ライセンスは以下の通りです。
 
 /* ==============================================================
-  Copyright (c) 1996-2004 SHIROUZU Hiroaki  All rights reserved.
+  Copyright (c) 1996-2012 SHIROUZU Hiroaki  All rights reserved.
 
-  �\�[�X�ƃo�C�i���`���̍Ĕz�z����юg�p�́A�u�ύX�̗L���A���p/
-  �񏤗p�ɂ�����炸�v�A�ȉ��̏����𖞂����ꍇ�ɋ�����܂�:
+  ソースとバイナリ形式の再配布および使用は、「変更の有無、商用/
+  非商用にかかわらず」、以下の条件を満たす場合に許可されます:
 
-  1. �\�[�X�R�[�h�̍Ĕz�z�́A��L�̒��쌠�\���A���̏����̃��X�g�A
-     �����ĉ��L�̔۔F��������ێ����Ȃ���΂Ȃ�܂���B
+  1. ソースコードの再配布は、上記の著作権表示、この条件のリスト、
+     そして下記の否認声明文を保持しなければなりません。
 
-  2. �o�C�i���`���̍Ĕz�z�́A��L�̒��쌠�\���A���̏����̃��X�g�A
-     �����ĉ��L�̔۔F���������A�z�z���Ƌ��ɒ񋟂����A��������
-     ��/�܂��͑��̎����Ƃ��ĕ������Ȃ���΂Ȃ�܂���B
+  2. バイナリ形式の再配布は、上記の著作権表示、この条件のリスト、
+     そして下記の否認声明文を、配布物と共に提供される、文書およ
+     び/または他の資料として複製しなければなりません。
 
-  3. ����Җ����A�܂������Ȃ鋤���v���Җ����A���m�ɗD�悷�镶��
-     �����ꂽ�������ɁA���̃\�t�g�E�G�A����h�����鐻�i�̕ۏ�
-     ��̔����i�Ɏg���Ă͂Ȃ�܂���B
+  3. 著作者名も、またいかなる共同貢献者名も、明確に優先する文書
+     化された許可無しに、このソフトウエアから派生する製品の保証
+     や販売促進に使われてはなりません。
 
- �u���̃\�t�g�E�G�A�́A��҂ɂ��u���邪�܂܂̏�ԁv�Œ񋟂���A
-   �����閾���I�܂��͈Öق̕ۏ؂�۔F���A�����Ȃ鑹�Q�ɑ΂��Ă�
-   �ӔC�𕉂��܂���B�v
+ 「このソフトウエアは、作者により「あるがままの状態」で提供され、
+   あらゆる明示的または暗黙の保証を否認し、いかなる損害に対しても
+   責任を負いません。」
 
 =============================================================== */
 
 
-�� 3. �T�|�[�g�ɂ���
+■ 3. サポートについて
 
-�E�T�|�[�g�͉��L��URL�ɋL�ڂ��Ă��� ipmsg-ML�i���C�y�ɂ��Q�����������j
-  �ōs���Ă��܂��B�܂��A�����o�[�W�����֌����Ă̒�ĂȂǂ����}�ł��B
- �i�ŐV�ł͏�ɂ����ɂ���܂��j�B�ݏ��I�� BBS ������܂��B
-    http://www.ipmsg.org/
+・サポートは下記のURLに記載している ipmsg-ML（お気軽にご参加ください）
+  で行っています。また、次期バージョンへ向けての提案なども歓迎です。
+ （最新版は常にここにあります）。互助的な BBS もあります。
+    http://ipmsg.org/
 
-�E���݃o�O�̎w�E��A���悢�\�[�X�R�[�h�ւ̃A�h�o�C�X�����}���܂��B
-
-
-�� 4. �R���p�C�����@�iVC++4.1J�Łj
-
-�Eipmsg.mdp �� VC++4.1 �Ŏ��s���܂��B���̒��ɁAIPMSG Japanese, English,
-  Debug, install, installEng, installDbg �ł���`����Ă��܂��B
-
-�E�œK���̓T�C�Y�D��ŁA��O�������O���Ă��܂��B
-
-�EVC++6.0 �ȍ~�ł��R���p�C���\�ł��B
+・潜在バグの指摘や、よりよいソースコードへのアドバイスを歓迎します。
 
 
-�� 5. �f�B���N�g���\��
+■ 4. コンパイル方法（VS2005以降）
 
-	IPMsg---+-IPMsg.mdp ... Project file(Japanese/English���p)
+  VS2005以降でビルドします。
+・IPMsgv3.0以降、埋め込み画像(PNG)用に、zlib/lipng を使っています。
+  http://www.libpng.org/pub/png/libpng.html
+  http://zlib.net/
+
+■ 5. ディレクトリ構成
+
+	IPMsg----+-IPMsg.sln ... Project file for VS2005以降
 		|
 		+-Src------+-ipmsg.cpp
 		|          |     :
 		|          +-install-+- install.cpp
 		|                    |       :
-		+-Win32JPN-+-
 		|
-		+-Win32ENG-+-
+		+-External-+-Zlib---+-zlib.vcproj
+		|          |            :
+		|          +-Libpng-+-libpng.vcproj
+		|                       :
+		+-Release--+-
 		|
-		+-Obj------+-Japanese-+-
+		+-Obj------+-Release-+-
 		           |
-		           +-English--+-
+		           +-Debug---+-
+
+■ 6. 自己展開インストーラ形式について
+
+・v3.10より、自己展開形式インストーラをサポートしています。
+　これはソースよりビルドされた install.exe の末尾に、以下のような
+　フォーマットで、ipmsg.exe setup.exe ipmsg.chm を付加したものです。
+　 \n===(70個)===\n
+　 ファイルサイズ ファイル名\n
+　 ZLIB圧縮ファイル
+
+・具体的には、以下のような python script で作成しています。
+
+----------------------------------------------------
+import sys, zlib
+
+def add_file(f, fname):
+	data = zlib.compress(open(fname, "rb").read())
+	f.write("\n%s\n" % ("=" * 70))
+	f.write("%d %s\n" % (len(data), fname))
+	f.write(data)
+
+def gen_inst(installer_name, installer_base, files):
+	f = open(installer_name, "wb")
+	f.write(open(installer_base, "rb").read())
+	for i in files:
+		add_file(f, i)
+	f.close()
+
+gen_inst("ipmsgXXX_installer.exe", "install.exe", ["ipmsg.exe", "ipmsg.chm", "setup.exe"])
+----------------------------------------------------
 

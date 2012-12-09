@@ -1,32 +1,40 @@
-static char *install_id = 
-	"@(#)Copyright (C) H.Shirouzu 1998-2004   install.cpp	Ver2.06";
+Ôªøstatic char *install_id = 
+	"@(#)Copyright (C) H.Shirouzu 1998-2012   install.cpp	Ver3.41";
 /* ========================================================================
 	Project  Name			: Installer for IPMSG32
 	Module Name				: Installer Application Class
 	Create					: 1998-06-14(Sun)
-	Update					: 2004-02-10(Tue)
+	Update					: 2012-04-03(Tue)
 	Copyright				: H.Shirouzu
 	Reference				: 
 	======================================================================== */
 
-#include "../tlib.h"
-#include "instrc.h"
+#include "../tlib/tlib.h"
+#include "resource.h"
 #include "install.h"
+#include "../version.h"
+#include "../../external/zlib/zlib.h"
 
-char	*SetupFiles [] = { INSTALL_EXENAME, README_NAME, OPENLAB_NAME, NULL };
+char	*SetupFiles [] = { IPMSG_EXENAME, SETUP_EXENAME, IPMSGHELP_NAME, NULL };
 
 /*
 	WinMain
 */
 int WINAPI WinMain(HINSTANCE hI, HINSTANCE, LPSTR cmdLine, int nCmdShow)
 {
+	if (!IsWin2K()) {
+		MessageBox(0, "Please use old version (v2.06 or earlier)", "Win95/98/Me/NT4.0 is not support", MB_OK);
+		::ExitProcess(0xffffffff);
+		return	0;
+	}
+
 	TInstApp	app(hI, cmdLine, nCmdShow);
 
 	return	app.Run();
 }
 
 /*
-	ÉCÉìÉXÉgÅ[ÉãÉAÉvÉäÉPÅ[ÉVÉáÉìÉNÉâÉX
+	„Ç§„É≥„Çπ„Éà„Éº„É´„Ç¢„Éó„É™„Ç±„Éº„Ç∑„Éß„É≥„ÇØ„É©„Çπ
 */
 TInstApp::TInstApp(HINSTANCE _hI, LPSTR _cmdLine, int _nCmdShow) : TApp(_hI, _cmdLine, _nCmdShow)
 {
@@ -46,27 +54,12 @@ void TInstApp::InitWindow(void)
 
 
 /*
-	ÉÅÉCÉìÉ_ÉCÉAÉçÉOÉNÉâÉX
+	„É°„Ç§„É≥„ÉÄ„Ç§„Ç¢„É≠„Ç∞„ÇØ„É©„Çπ
 */
-TInstDlg::TInstDlg(char *cmdLine) : TDlg(INSTALL_DIALOG), staticText(this)
+TInstDlg::TInstDlg(char *cmdLine) : TDlg(INSTALL_DIALOG)
 {
-	cfg.mode = SETUP_MODE;
-	cfg.portNo = IPMSG_DEFAULT_PORT;
-	cfg.startupLink	= TRUE;
-	cfg.programLink	= TRUE;
-	cfg.desktopLink	= TRUE;
-	cfg.delPubkey	= TRUE;
-
-	if (cmdLine)
-	{
-		for (char *tok = strtok(cmdLine, " \t\n"); tok; tok = strtok(NULL, " \t\n"))
-		{
-			if (strcmp(tok, UNINSTALL_CMDLINE) == 0)
-				cfg.mode = UNINSTALL_MODE;
-			else if (*tok >= '0' && *tok <= '9' && atoi(tok) > 0)
-				cfg.portNo = atoi(tok);
-		}
-	}
+	runasImm = FALSE;
+	runasWnd = NULL;
 }
 
 TInstDlg::~TInstDlg()
@@ -74,181 +67,245 @@ TInstDlg::~TInstDlg()
 }
 
 /*
-	ÉÅÉCÉìÉ_ÉCÉAÉçÉOóp WM_INITDIALOG èàóùÉãÅ[É`Éì
+	„É°„Ç§„É≥„ÉÄ„Ç§„Ç¢„É≠„Ç∞Áî® WM_INITDIALOG Âá¶ÁêÜ„É´„Éº„ÉÅ„É≥
 */
 BOOL TInstDlg::EvCreate(LPARAM lParam)
 {
-	if (IsNewShell() != TRUE)
-	{
-		MessageBox(NOTNEWSHELL_MSGSTR);
-		::PostQuitMessage(0);
-		return	TRUE;
-	}
-
-	if (cfg.portNo != IPMSG_DEFAULT_PORT)
-	{
-		char	buf[100];
-		::GetWindowText(hWnd, buf, sizeof(buf));
-		::wsprintf(buf + strlen(buf), " (PortNo = %d)", cfg.portNo);
-		SetWindowText(buf);
-	}
+	char	title[256], title2[256];
+	GetWindowText(title, sizeof(title));
+	::wsprintf(title2, "%s ver%s", title, GetVersionStr());
+	SetWindowText(title2);
 
 	GetWindowRect(&rect);
 	int		cx = ::GetSystemMetrics(SM_CXFULLSCREEN), cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
 	int		xsize = rect.right - rect.left, ysize = rect.bottom - rect.top;
 
-	::SetClassLong(hWnd, GCL_HICON, (LONG)::LoadIcon(TApp::hI, (LPCSTR)SETUP_ICON));
+	::SetClassLong(hWnd, GCL_HICON, (LONG)::LoadIcon(TApp::GetInstance(), (LPCSTR)SETUP_ICON));
 	MoveWindow((cx - xsize)/2, (cy - ysize)/2, xsize, ysize, TRUE);
 	Show();
 
-// ÉvÉçÉpÉeÉBÉVÅ[ÉgÇÃê∂ê¨
-	staticText.CreateByWnd(GetDlgItem(INSTALL_STATIC));
-	propertySheet = new TInstSheet(&staticText, &cfg);
+	if (IsWinVista() && !TIsUserAnAdmin() && TIsEnableUAC()) {
+		HWND	hRunas = GetDlgItem(RUNAS_BUTTON);
+		::SetWindowLong(hRunas, GWL_STYLE, ::GetWindowLong(hRunas, GWL_STYLE)|WS_VISIBLE);
+		::SendMessage(hRunas, BCM_SETSHIELD, 0, 1);
+	}
 
-// åªç›ÉfÉBÉåÉNÉgÉäê›íË
-	char	buf[MAX_PATH], setupDir[MAX_PATH], resetupDir[MAX_PATH];
+// ÁèæÂú®„Éá„Ç£„É¨„ÇØ„Éà„É™Ë®≠ÂÆö
+	char	buf[MAX_PATH_U8], setupDir[MAX_PATH_U8];
+#ifdef _WIN64
+	char	x86dir[MAX_PATH_U8] = "";
+#endif
 
-	::GetModuleFileName(NULL, resetupDir, sizeof(resetupDir));
-	GetParentDir(resetupDir, resetupDir);
-	SetDlgItemText(RESETUP_EDIT, resetupDir);
-
-// Program FilesÇÃÉpÉXéÊÇËèoÇµ
+// Program Files„ÅÆ„Éë„ÇπÂèñ„ÇäÂá∫„Åó
 	TRegistry	reg(HKEY_LOCAL_MACHINE);
-	if (reg.OpenKey(REGSTR_PATH_SETUP))
-	{
-		if (reg.GetStr(REGSTR_PROGRAMFILES, buf, sizeof(buf)))
+	if (reg.OpenKey(REGSTR_PATH_SETUP)) {
+		if (reg.GetStr(REGSTR_PROGRAMFILES, buf, sizeof(buf))) {
 			MakePath(setupDir, buf, IPMSG_STR);
+		}
+#ifdef _WIN64
+		if (reg.GetStr(REGSTR_PROGRAMFILESX86, buf, sizeof(buf)))
+			MakePath(x86dir, buf, IPMSG_STR);
+#endif
 		reg.CloseKey();
 	}
 
-// ä˘Ç…ÉZÉbÉgÉAÉbÉvÇ≥ÇÍÇƒÇ¢ÇÈèÍçáÇÕÅAÉZÉbÉgÉAÉbÉvÉfÉBÉåÉNÉgÉäÇì«Ç›èoÇ∑
-	if (reg.OpenKey(REGSTR_PATH_APPPATHS))
-	{
-		if (reg.OpenKey(IPMSG_EXENAME))
-		{
-			reg.GetStr(REGSTR_PATH, setupDir, sizeof(setupDir));
+// Êó¢„Å´„Çª„ÉÉ„Éà„Ç¢„ÉÉ„Éó„Åï„Çå„Å¶„ÅÑ„ÇãÂ†¥Âêà„ÅØ„ÄÅ„Çª„ÉÉ„Éà„Ç¢„ÉÉ„Éó„Éá„Ç£„É¨„ÇØ„Éà„É™„ÇíË™≠„ÅøÂá∫„Åô
+	if (reg.OpenKey(REGSTR_PATH_APPPATHS)) {
+		if (reg.OpenKey(IPMSG_EXENAME)) {
+			if (reg.GetStr(REGSTR_PATH, buf, sizeof(buf))) {
+#ifdef _WIN64
+				if (strcmp(buf, x86dir))
+#endif
+				strcpy(setupDir, buf);
+			}
 			reg.CloseKey();
 		}
 		reg.CloseKey();
 	}
-	SetDlgItemText(FILE_EDIT, setupDir);
 
-	if (cfg.mode != UNINSTALL_MODE && (strcmp(setupDir, resetupDir) == 0 || GetDriveTypeEx(resetupDir) == DRIVE_REMOTE))
-		cfg.mode = RESETUP_MODE;
-	::SendMessage(GetDlgItem(cfg.mode == SETUP_MODE ? SETUP_RADIO : cfg.mode == RESETUP_MODE ? RESETUP_RADIO : UNINSTALL_RADIO), BM_SETCHECK, 1, 0);
-	ChangeMode();
+	SetDlgItemTextU8(FILE_EDIT, setupDir);
+	CheckDlgButton(STARTUP_CHECK, 1);
+	CheckDlgButton(PROGRAM_CHECK, 1);
+	CheckDlgButton(DESKTOP_CHECK, 1);
+	CheckDlgButton(EXTRACT_CHECK, 0);
+
+	char	*p = strstr(GetCommandLine(), "runas=");
+	if (p) {
+		runasWnd = (HWND)strtoul(p+6, 0, 16);
+		if (!runasWnd || !IsWindow(runasWnd)) PostQuitMessage(0);
+		if ((p = strstr(p, ",imm="))) runasImm = atoi(p+5);
+
+		CheckDlgButton(EXTRACT_CHECK, ::IsDlgButtonChecked(runasWnd, EXTRACT_CHECK));
+		CheckDlgButton(STARTUP_CHECK, ::IsDlgButtonChecked(runasWnd, STARTUP_CHECK));
+		CheckDlgButton(PROGRAM_CHECK, ::IsDlgButtonChecked(runasWnd, PROGRAM_CHECK));
+		CheckDlgButton(DESKTOP_CHECK, ::IsDlgButtonChecked(runasWnd, DESKTOP_CHECK));
+
+		WCHAR	wbuf[MAX_PATH] = L"";
+		::SendDlgItemMessageW(runasWnd, FILE_EDIT, WM_GETTEXT, MAX_PATH, (LPARAM)wbuf);
+		SetDlgItemTextU8(FILE_EDIT, WtoU8(wbuf));
+
+		::SendMessage(runasWnd, WM_IPMSG_HIDE, 0, 0);
+		if (runasImm) {
+			PostMessage(WM_IPMSG_INSTALL, 0, 0);
+		}
+	}
 
 	return	TRUE;
 }
 
+BOOL TInstDlg::EvNcDestroy(void)
+{
+	if (runasWnd) {
+		::PostMessage(runasWnd, WM_IPMSG_QUIT, 0, 0);
+		runasWnd = NULL;
+	}
+	PostQuitMessage(0);
+	return	FALSE;
+}
+
+BOOL RunAsAdmin(HWND hWnd, BOOL imm)
+{
+	WCHAR	path[MAX_PATH], buf[MAX_BUF];
+
+	::GetModuleFileNameW(::GetModuleHandle(NULL), path, sizeof(path));
+	swprintf(buf, L"/runas=%x,imm=%d", hWnd, imm);
+	ShellExecuteW(hWnd, L"runas", path, buf, NULL, SW_SHOW);
+
+	return TRUE;
+}
+
 /*
-	ÉÅÉCÉìÉ_ÉCÉAÉçÉOóp WM_COMMAND èàóùÉãÅ[É`Éì
+	„É°„Ç§„É≥„ÉÄ„Ç§„Ç¢„É≠„Ç∞Áî® WM_COMMAND Âá¶ÁêÜ„É´„Éº„ÉÅ„É≥
 */
 BOOL TInstDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 {
 	switch (wID)
 	{
 	case IDOK:
-		propertySheet->GetData();
-		if (cfg.mode == UNINSTALL_MODE)
-			UnInstall();
-		else
-			Install();
+		CheckDlgButton(EXTRACT_CHECK, 0);
+		Install();
 		return	TRUE;
 
 	case IDCANCEL:
-		::PostQuitMessage(0);
+		EndDialog(FALSE);
+		return	TRUE;
+
+	case RUNAS_BUTTON:
+		RunAsAdmin(hWnd, FALSE);
+		return	TRUE;
+
+	case EXTRACT_BUTTON:
+		CheckDlgButton(EXTRACT_CHECK, 1);
+		Install();
 		return	TRUE;
 
 	case FILE_BUTTON:
 		BrowseDirDlg(this, FILE_EDIT, "Select Install Directory");
 		return	TRUE;
+	}
+	return	FALSE;
+}
 
-	case SETUP_RADIO:
-	case RESETUP_RADIO:
-	case UNINSTALL_RADIO:
-		if (wNotifyCode == BN_CLICKED)
-			ChangeMode();
+BOOL TInstDlg::EventApp(UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	switch (uMsg) {
+	case WM_IPMSG_HIDE:
+		Show(SW_HIDE);
+		return	TRUE;
+
+	case WM_IPMSG_QUIT:
+		if (wParam == 1) {
+			AppKick();
+		}
+		PostQuitMessage(0);
+		return	TRUE;
+
+	case WM_IPMSG_INSTALL:
+		Install();
 		return	TRUE;
 	}
 	return	FALSE;
 }
 
-void TInstDlg::ChangeMode(void)
+BOOL TInstDlg::AppKick()
 {
-	cfg.mode = SendDlgItemMessage(SETUP_RADIO, BM_GETCHECK, 0, 0) ? SETUP_MODE : SendDlgItemMessage(RESETUP_RADIO, BM_GETCHECK, 0, 0) ? RESETUP_MODE : UNINSTALL_MODE;
-	::EnableWindow(GetDlgItem(FILE_EDIT), cfg.mode == SETUP_MODE);
-	::EnableWindow(GetDlgItem(RESETUP_EDIT), cfg.mode == RESETUP_MODE);
-	propertySheet->Paste();
+	char	setupDir[MAX_PATH_U8], setupPath[MAX_PATH_U8];
+
+	GetDlgItemTextU8(FILE_EDIT, setupDir, sizeof(setupDir));
+	SetCurrentDirectoryU8(setupDir);
+
+	MakePath(setupPath, setupDir, IPMSG_EXENAME);
+	return	(int)ShellExecuteU8(NULL, NULL, setupPath, "/SHOW_HISTORY", 0, SW_SHOW) > 32;
 }
 
 BOOL TInstDlg::Install(void)
 {
-	char	buf[MAX_PATH], setupDir[MAX_PATH], setupPath[MAX_PATH];
+	char	buf[MAX_PATH_U8], setupDir[MAX_PATH_U8], setupPath[MAX_PATH_U8];
+	char	installPath[MAX_PATH_U8];
+	BOOL	extract_only = IsDlgButtonChecked(EXTRACT_CHECK);
 
-// åªç›ÅAãNìÆíÜÇÃ ipmsg ÇèIóπ
-	if (TerminateIPMsg() != TRUE)
-		return	FALSE;
+// ÁèæÂú®„ÄÅËµ∑Âãï‰∏≠„ÅÆ ipmsg „ÇíÁµÇ‰∫Ü
+	int		st = extract_only ? 0 : TerminateIPMsg();
+	if (st == 1) return	FALSE;
 
-// ÉCÉìÉXÉgÅ[ÉãÉpÉXê›íË
-	GetDlgItemText(cfg.mode == SETUP_MODE ? FILE_EDIT : RESETUP_EDIT, setupDir, sizeof(setupDir));
-	CreateDirectory(setupDir, NULL);
-	DWORD	attr = GetFileAttributes(setupDir);
+// „Ç§„É≥„Çπ„Éà„Éº„É´„Éë„ÇπË®≠ÂÆö
+	GetDlgItemTextU8(FILE_EDIT, setupDir, sizeof(setupDir));
+
+	if (IsWinVista() && !TIsUserAnAdmin() && TIsEnableUAC()
+			&& TIsVirtualizedDirV(U8toW(setupDir))) {
+		if (MessageBox(GetLoadStr(IDS_REQUIREADMIN), INSTALL_STR,
+				MB_OKCANCEL|MB_ICONINFORMATION) != IDOK) return	FALSE;
+		return	RunAsAdmin(hWnd, TRUE);
+	}
+
+	CreateDirectoryU8(setupDir, NULL);
+	DWORD	attr = GetFileAttributesU8(setupDir);
 	if (attr == 0xffffffff || (attr & FILE_ATTRIBUTE_DIRECTORY) == 0)
-		return	MessageBox(NOTCREATEDIR_MSGSTR), FALSE;
+		return	MessageBox(GetLoadStr(IDS_NOTCREATEDIR), INSTALL_STR), FALSE;
 	MakePath(setupPath, setupDir, IPMSG_EXENAME);
 
-	if (MessageBox(START_MSGSTR, INSTALL_STR, MB_OKCANCEL|MB_ICONINFORMATION) != IDOK)
+	if (st == 2) {
+		MessageBox(GetLoadStr(IDS_CANTTERMINATE), INSTALL_STR);
 		return	FALSE;
+	}
+	if (!runasImm &&
+		MessageBox(GetLoadStr(IDS_START), INSTALL_STR, MB_OKCANCEL|MB_ICONINFORMATION) != IDOK) {
+		return	FALSE;
+	}
+	runasImm = FALSE;
 
-// ÉtÉ@ÉCÉãÉRÉsÅ[
-	if (cfg.mode == SETUP_MODE)
-	{
-		char			installPath[MAX_PATH], orgDir[MAX_PATH];
-		WIN32_FIND_DATA	data;
-		HANDLE			fh;
-		BOOL			copy = TRUE;
-
-		GetDlgItemText(RESETUP_EDIT, orgDir, sizeof(orgDir));
-		MakePath(buf, orgDir, IPMSG_EXENAME);
-		if ((fh = ::FindFirstFile(buf, &data)) != INVALID_HANDLE_VALUE)
-		{
-			if (data.nFileSizeLow < MAX_WRAPPER_IPMSGSIZE)
-				MakePath(buf, orgDir, RESOLVE_WRAPPER_IPMSG);
-			::FindClose(fh);
+// „Éï„Ç°„Ç§„É´ÁîüÊàê
+	for (int i=0; SetupFiles[i]; i++) {
+		MakePath(installPath, setupDir, SetupFiles[i]);
+		CreateStatus cs = CreateFileBySelf(installPath, SetupFiles[i]);
+		if (cs == CS_BROKEN) {
+			MessageBox(GetLoadStr(IDS_BROKENARCHIVE), INSTALL_STR);
+			return	FALSE;
 		}
-		if ((fh = ::FindFirstFile(setupPath, &data)) != INVALID_HANDLE_VALUE)
-		{
-			if (data.nFileSizeLow < MAX_WRAPPER_IPMSGSIZE)
-				copy = FALSE;
-			::FindClose(fh);
-		}
-		if (copy && ::CopyFile(buf, setupPath, FALSE) == FALSE)
-			return	MessageBox(setupPath, NOTCREATEFILE_MSGSTR), FALSE;
-
-		for (int cnt=0; SetupFiles[cnt] != NULL; cnt++)
-		{
-			MakePath(buf, orgDir, SetupFiles[cnt]);
-			MakePath(installPath, setupDir, SetupFiles[cnt]);
-			if (::CopyFile(buf, installPath, FALSE) == FALSE)
-				return	MessageBox(installPath, NOTCREATEFILE_MSGSTR), FALSE;
+		else if (cs == CS_ACCESS) {
+			const char *msg = Fmt("%s\r\n%s", GetLoadStrU8(IDS_NOTCREATEFILE), installPath);
+			MessageBoxU8(msg, INSTALL_STR);
+			return	FALSE;
 		}
 	}
 
-// ÉXÉ^Å[ÉgÉAÉbÉvÅïÉfÉXÉNÉgÉbÉvÇ…ìoò^
-	TRegistry	reg(HKEY_CURRENT_USER);
-	if (reg.OpenKey(REGSTR_SHELLFOLDERS))
-	{
-		char	*regStr[]	= { REGSTR_STARTUP, REGSTR_PROGRAMS, REGSTR_DESKTOP, NULL };
-		BOOL	execFlg[]	= { cfg.startupLink, cfg.programLink, cfg.desktopLink };
+// Â±ïÈñã„ÅÆ„Åø
+	if (extract_only) {
+		ShellExecuteU8(NULL, NULL, setupDir, 0, 0, SW_SHOW);
+		return TRUE;
+	}
 
-		for (int cnt=0; regStr[cnt] != NULL; cnt++)
-		{
-			if (reg.GetStr(regStr[cnt], buf, sizeof(buf)))
-			{
-				if (cnt != 0 || RemoveSameLink(buf, buf) != TRUE)
+// „Çπ„Çø„Éº„Éà„Ç¢„ÉÉ„ÉóÔºÜ„Éá„Çπ„ÇØ„Éà„ÉÉ„Éó„Å´ÁôªÈå≤
+	TRegistry	reg(HKEY_CURRENT_USER);
+	if (reg.OpenKey(REGSTR_SHELLFOLDERS)) {
+		char	*regStr[] = { REGSTR_STARTUP, REGSTR_PROGRAMS, REGSTR_DESKTOP, NULL };
+		BOOL	resId[]   = { STARTUP_CHECK,  PROGRAM_CHECK,   DESKTOP_CHECK,  NULL };
+
+		for (int i=0; regStr[i]; i++) {
+			if (reg.GetStr(regStr[i], buf, sizeof(buf))) {
+				if (i != 0 || !RemoveSameLink(buf, buf))
 					::wsprintf(buf + strlen(buf), "\\%s", IPMSG_SHORTCUT_NAME);
-				if (execFlg[cnt])
+				if (IsDlgButtonChecked(resId[i]))
 					SymLink(setupPath, buf);
 				else
 					DeleteLink(buf);
@@ -257,12 +314,10 @@ BOOL TInstDlg::Install(void)
 		reg.CloseKey();
 	}
 
-// ÉåÉWÉXÉgÉäÇ…ÉAÉvÉäÉPÅ[ÉVÉáÉìèÓïÒÇìoò^
+// „É¨„Ç∏„Çπ„Éà„É™„Å´„Ç¢„Éó„É™„Ç±„Éº„Ç∑„Éß„É≥ÊÉÖÂ†±„ÇíÁôªÈå≤
 	reg.ChangeTopKey(HKEY_LOCAL_MACHINE);
-	if (reg.OpenKey(REGSTR_PATH_APPPATHS))
-	{
-		if (reg.CreateKey(IPMSG_EXENAME))
-		{
+	if (reg.OpenKey(REGSTR_PATH_APPPATHS)) {
+		if (reg.CreateKey(IPMSG_EXENAME)) {
 			reg.SetStr(NULL, setupPath);
 			reg.SetStr(REGSTR_PATH, setupDir);
 			reg.CloseKey();
@@ -270,12 +325,10 @@ BOOL TInstDlg::Install(void)
 		reg.CloseKey();
 	}
 
-// ÉåÉWÉXÉgÉäÇ…ÉAÉìÉCÉìÉXÉgÅ[ÉãèÓïÒÇìoò^
-	if (reg.OpenKey(REGSTR_PATH_UNINSTALL))
-	{
-		if (reg.CreateKey(IPMSG_NAME))
-		{
-			MakePath(buf, setupDir, INSTALL_EXENAME);
+// „É¨„Ç∏„Çπ„Éà„É™„Å´„Ç¢„É≥„Ç§„É≥„Çπ„Éà„Éº„É´ÊÉÖÂ†±„ÇíÁôªÈå≤
+	if (reg.OpenKey(REGSTR_PATH_UNINSTALL)) {
+		if (reg.CreateKey(IPMSG_NAME)) {
+			MakePath(buf, setupDir, SETUP_EXENAME);
 			strcat(buf, " /r");
 			reg.SetStr(REGSTR_VAL_UNINSTALLER_DISPLAYNAME, IPMSG_FULLNAME);
 			reg.SetStr(REGSTR_VAL_UNINSTALLER_COMMANDLINE, buf);
@@ -284,142 +337,78 @@ BOOL TInstDlg::Install(void)
 		reg.CloseKey();
 	}
 
-// ÉRÉsÅ[ÇµÇΩÉAÉvÉäÉPÅ[ÉVÉáÉìÇãNìÆ
-	if (MessageBox(SETUPCOMPLETE_MSGSTR, INSTALL_STR, MB_OKCANCEL|MB_ICONINFORMATION) == IDOK)
-	{
-		::SetCurrentDirectory(setupDir);
-		::WinExec(setupPath, SW_SHOW);
+// „Ç≥„Éî„Éº„Åó„Åü„Ç¢„Éó„É™„Ç±„Éº„Ç∑„Éß„É≥„ÇíËµ∑Âãï
+	const char *msg = GetLoadStr(IDS_SETUPCOMPLETE);
+	int			flg = MB_OKCANCEL|MB_ICONINFORMATION;
+
+//	if (IsWinVista() && TIsUserAnAdmin() && TIsEnableUAC()) {
+//		msg = Fmt("%s%s", msg, GetLoadStr(IDS_COMPLETE_UACADD));
+//		flg |= MB_DEFBUTTON2;
+//	}
+	if (IsWin7()) {
+		msg = Fmt("%s%s", msg, GetLoadStr(IDS_COMPLETE_WIN7));
 	}
-	if (cfg.mode == SETUP_MODE)
-		::ShellExecute(NULL, NULL, setupDir, 0, 0, SW_SHOW);
-
-	::PostQuitMessage(0);
-	return	TRUE;
-}
-
-BOOL TInstDlg::UnInstall(void)
-{
-// åªç›ÅAãNìÆíÜÇÃ ipmsg ÇèIóπ
-	if (TerminateIPMsg() != TRUE)
-		return	FALSE;
-
-	if (MessageBox(START_MSGSTR, UNINSTALL_STR, MB_OKCANCEL|MB_ICONINFORMATION) != IDOK)
-		return	FALSE;
-
-// ÉXÉ^Å[ÉgÉAÉbÉvÅïÉfÉXÉNÉgÉbÉvÇ©ÇÁçÌèú
-	TRegistry	reg(HKEY_CURRENT_USER);
-	if (reg.OpenKey(REGSTR_SHELLFOLDERS))
-	{
-		char	buf[MAX_PATH];
-		char	*regStr[]	= { REGSTR_STARTUP, REGSTR_PROGRAMS, REGSTR_DESKTOP, NULL };
-
-		for (int cnt=0; regStr[cnt] != NULL; cnt++)
-		{
-			if (reg.GetStr(regStr[cnt], buf, sizeof(buf)))
-			{
-				if (cnt == 0)
-					RemoveSameLink(buf);
-				::wsprintf(buf + strlen(buf), "\\%s", IPMSG_SHORTCUT_NAME);
-				DeleteLink(buf);
+	TLaunchDlg	dlg(msg, this);
+	if (dlg.Exec() == IDOK) {
+		if (runasWnd) {
+			Wstr	wbuf(setupDir);
+			if (::SendDlgItemMessageW(runasWnd, FILE_EDIT, WM_SETTEXT, 0, (LPARAM)wbuf.Buf())) {
+				::PostMessage(runasWnd, WM_IPMSG_QUIT, 1, 0);
+				runasWnd = NULL;
 			}
 		}
-		reg.CloseKey();
-	}
-
-// ÉåÉWÉXÉgÉäÇ©ÇÁÉÜÅ[ÉUÅ[ê›íËèÓïÒÇçÌèú
-	if (reg.ChangeApp(HSTOOLS_STR))
-		reg.DeleteChildTree(REGSTR_IPMSG);
-
-// ÉåÉWÉXÉgÉäÇ©ÇÁÉAÉvÉäÉPÅ[ÉVÉáÉìèÓïÒÇçÌèú
-	char	setupDir[MAX_PATH];		// ÉZÉbÉgÉAÉbÉvÉfÉBÉåÉNÉgÉäèÓïÒÇï€ë∂
-	GetDlgItemText(RESETUP_EDIT, setupDir, sizeof(setupDir));
-
-	reg.ChangeTopKey(HKEY_LOCAL_MACHINE);
-	if (reg.OpenKey(REGSTR_PATH_APPPATHS))
-	{
-		if (reg.OpenKey(IPMSG_EXENAME))
-		{
-			reg.GetStr(REGSTR_PATH, setupDir, sizeof(setupDir));
-			reg.CloseKey();
+		else {
+			AppKick();
 		}
-		reg.DeleteKey(IPMSG_EXENAME);
-		reg.CloseKey();
+	}
+	else {
+		HWND	hHelp = ShowHelpU8(0, setupDir, GetLoadStrU8(IDS_IPMSGHELP), "#history");
+		if (hHelp) {
+			Show(SW_HIDE);
+			while (::IsWindow(hHelp)) {
+				this->Sleep(100);
+			}
+		}
 	}
 
-// ÉåÉWÉXÉgÉäÇ©ÇÁÉAÉìÉCÉìÉXÉgÅ[ÉãèÓïÒÇçÌèú
-	if (reg.OpenKey(REGSTR_PATH_UNINSTALL))
-	{
-		reg.DeleteKey(IPMSG_NAME);
-		reg.CloseKey();
+	if (runasWnd) {
+		::PostMessage(runasWnd, WM_IPMSG_QUIT, 0, 0);
+		runasWnd = NULL;
 	}
 
-// èIóπÉÅÉbÉZÅ[ÉW
-	MessageBox(UNINSTCOMPLETE_MSGSTR);
-
-// ÉCÉìÉXÉgÅ[ÉãÉfÉBÉåÉNÉgÉäÇäJÇ≠
-	if (GetDriveTypeEx(setupDir) != DRIVE_REMOTE)
-		::ShellExecute(NULL, NULL, setupDir, 0, 0, SW_SHOW);
-
-// åˆäJåÆÇÃçÌèú
-#ifndef MS_DEF_PROV
-typedef unsigned long HCRYPTPROV;
-#define MS_DEF_PROV				"Microsoft Base Cryptographic Provider v1.0"
-#define MS_ENHANCED_PROV		"Microsoft Enhanced Cryptographic Provider v1.0"
-#define CRYPT_DELETEKEYSET      0x00000010
-#define CRYPT_MACHINE_KEYSET    0x00000020
-#define PROV_RSA_FULL			1
-#endif
-	BOOL		(WINAPI *pCryptAcquireContext)(HCRYPTPROV *, LPCSTR, LPCSTR, DWORD, DWORD);
-	HINSTANCE	advdll;
-
-	if (cfg.delPubkey && (advdll = ::LoadLibrary("advapi32.dll")) && (pCryptAcquireContext = (BOOL (WINAPI *)(HCRYPTPROV *, LPCSTR, LPCSTR, DWORD, DWORD))::GetProcAddress(advdll, "CryptAcquireContextA")))
-	{
-		HCRYPTPROV	csp = NULL;
-		char		contName[MAX_PATH], userName[MAX_PATH];
-		DWORD		size = sizeof(userName);
-
-		::GetUserName(userName, &size);
-
-		::wsprintf(contName, "ipmsg.rsa1024.%s", userName);
-		pCryptAcquireContext(&csp, contName, MS_ENHANCED_PROV, PROV_RSA_FULL, CRYPT_DELETEKEYSET|CRYPT_MACHINE_KEYSET);
-		pCryptAcquireContext(&csp, contName, MS_ENHANCED_PROV, PROV_RSA_FULL, CRYPT_DELETEKEYSET);
-
-		::wsprintf(contName, "ipmsg.rsa512.%s", userName);
-		pCryptAcquireContext(&csp, contName, MS_DEF_PROV, PROV_RSA_FULL, CRYPT_DELETEKEYSET|CRYPT_MACHINE_KEYSET);
-		pCryptAcquireContext(&csp, contName, MS_DEF_PROV, PROV_RSA_FULL, CRYPT_DELETEKEYSET);
-	}
-
+//	ShellExecuteU8(NULL, NULL, setupDir, 0, 0, SW_SHOW);
 	::PostQuitMessage(0);
 	return	TRUE;
 }
 
 /*
-	ìØÇ∂ì‡óeÇéùÇ¬ÉVÉáÅ[ÉgÉJÉbÉgÇçÌèúÅiÉXÉ^Å[ÉgÉAÉbÉvÇ÷ÇÃèdï°ìoò^ÇÊÇØÅj
+	Âêå„ÅòÂÜÖÂÆπ„ÇíÊåÅ„Å§„Ç∑„Éß„Éº„Éà„Ç´„ÉÉ„Éà„ÇíÂâäÈô§Ôºà„Çπ„Çø„Éº„Éà„Ç¢„ÉÉ„Éó„Å∏„ÅÆÈáçË§áÁôªÈå≤„Çà„ÅëÔºâ
 */
-BOOL TInstDlg::RemoveSameLink(const char *dir, char *remove_path)
+BOOL RemoveSameLink(const char *dir, char *remove_path)
 {
-	char			path[MAX_PATH], dest[MAX_PATH], arg[MAX_PATH];
-	HANDLE			fh;
-	WIN32_FIND_DATA	data;
-	BOOL			ret = FALSE;
+	char				path[MAX_PATH_U8], dest[MAX_PATH_U8], arg[MAX_PATH_U8];
+	HANDLE				fh;
+	WIN32_FIND_DATA_U8	data;
+	BOOL				ret = FALSE;
 
 	::wsprintf(path, "%s\\*.*", dir);
-	if ((fh = ::FindFirstFile(path, &data)) == INVALID_HANDLE_VALUE)
+	if ((fh = FindFirstFileU8(path, &data)) == INVALID_HANDLE_VALUE)
 		return	FALSE;
 
 	do {
 		::wsprintf(path, "%s\\%s", dir, data.cFileName);
-		if (ReadLink(path, dest, arg) && *arg == 0)
-		{
-			int		dest_len = strlen(dest), ipmsg_len = strlen(IPMSG_EXENAME);
-			if (dest_len > ipmsg_len && strncmpi(dest + dest_len - ipmsg_len, IPMSG_EXENAME, ipmsg_len) == 0) {
-				ret = ::DeleteFile(path);
-				if (remove_path != NULL)
+		if (ReadLinkU8(path, dest, arg) && *arg == 0) {
+			int		dest_len = (int)strlen(dest);
+			int		ipmsg_len = (int)strlen(IPMSG_EXENAME);
+			if (dest_len > ipmsg_len &&
+					strncmpi(dest + dest_len - ipmsg_len, IPMSG_EXENAME, ipmsg_len) == 0) {
+				ret = DeleteFileU8(path);
+				if (remove_path)
 					strcpy(remove_path, path);
 			}
 		}
 
-	} while (::FindNextFile(fh, &data));
+	} while (FindNextFileU8(fh, &data));
 
 	::FindClose(fh);
 	return	ret;
@@ -427,139 +416,85 @@ BOOL TInstDlg::RemoveSameLink(const char *dir, char *remove_path)
 
 
 /*
-	óßÇøè„Ç™Ç¡ÇƒÇ¢ÇÈ IPMSG ÇèIóπ
+	Á´ã„Å°‰∏ä„Åå„Å£„Å¶„ÅÑ„Çã IPMSG „ÇíÁµÇ‰∫Ü
 */
-BOOL TInstDlg::TerminateIPMsg(void)
+int TInstDlg::TerminateIPMsg()
 {
 	BOOL	existFlg = FALSE;
 
 	::EnumWindows(TerminateIPMsgProc, (LPARAM)&existFlg);
-	if (existFlg)
-	{
-		if (MessageBox(TERMINATE_MSGSTR, "", MB_OKCANCEL) == IDCANCEL)
-			return	FALSE;
+	if (existFlg) {
+		if (MessageBox(GetLoadStr(IDS_TERMINATE), INSTALL_STR, MB_OKCANCEL) == IDCANCEL)
+			return	1;
 		::EnumWindows(TerminateIPMsgProc, NULL);
+		Sleep(500);
 	}
-	return	TRUE;
+	existFlg = FALSE;
+	::EnumWindows(TerminateIPMsgProc, (LPARAM)&existFlg);
+
+	return	!existFlg ? 0 : 2;
 }
 
 /*
-	lParam == NULL ...	ëS IPMSG ÇèIóπ
-	lParam != NULL ...	lParam Ç BOOL * Ç∆Ç›Ç»ÇµÅAIPMSG proccess Ç™ë∂ç›Ç∑ÇÈ
-						èÍçáÇÕÅAÇªÇ±Ç…TRUE Çë„ì¸Ç∑ÇÈÅB
+	lParam == NULL ...	ÂÖ® IPMSG „ÇíÁµÇ‰∫Ü
+	lParam != NULL ...	lParam „Çí BOOL * „Å®„Åø„Å™„Åó„ÄÅIPMSG proccess „ÅåÂ≠òÂú®„Åô„Çã
+						Â†¥Âêà„ÅØ„ÄÅ„Åù„Åì„Å´TRUE „Çí‰ª£ÂÖ•„Åô„Çã„ÄÇ
 */
 BOOL CALLBACK TerminateIPMsgProc(HWND hWnd, LPARAM lParam)
 {
-	char	buf[100];
+	char	buf[MAX_BUF];
 
-	if (::GetClassName(hWnd, buf, sizeof(buf)) != 0)
-	{
-		if (strncmpi(IPMSG_CLASS, buf, strlen(IPMSG_CLASS)) == 0)
-		{
-			if (lParam)
+	if (::GetClassName(hWnd, buf, sizeof(buf)) != 0) {
+		if (strncmpi(IPMSG_CLASS, buf, strlen(IPMSG_CLASS)) == 0) {
+			if (lParam) {
 				*(BOOL *)lParam = TRUE;		// existFlg;
-			else
-				::SendMessage(hWnd, WM_CLOSE, 0, 0);
+			}
+			else {
+				DWORD	procId = 0;
+				if (::GetWindowThreadProcessId(hWnd, &procId) && procId) {
+					HANDLE	hProc = ::OpenProcess(SYNCHRONIZE, FALSE, procId);
+					::PostMessage(hWnd, WM_CLOSE, 0, 0);
+					::WaitForSingleObject(hProc, 5000);
+					::CloseHandle(hProc);
+				}
+			}
 		}
 	}
 	return	TRUE;
 }
 
-
-TInstSheet::TInstSheet(TWin *_parent, InstallCfg *_cfg) : TDlg(INSTALL_SHEET, _parent)
-{
-	cfg = _cfg;
-}
-
-void TInstSheet::GetData(void)
-{
-	if (resId == UNINSTALL_SHEET) {
-		cfg->delPubkey = SendDlgItemMessage(DELPUBKEY_CHECK, BM_GETCHECK, 0, 0);
-	}
-	else {
-		cfg->startupLink = SendDlgItemMessage(STARTUP_CHECK, BM_GETCHECK, 0, 0);
-		cfg->programLink = SendDlgItemMessage(PROGRAM_CHECK, BM_GETCHECK, 0, 0);
-		cfg->desktopLink = SendDlgItemMessage(DESKTOP_CHECK, BM_GETCHECK, 0, 0);
-	}
-}
-
-void TInstSheet::PutData(void)
-{
-	if (resId == UNINSTALL_SHEET) {
-		SendDlgItemMessage(DELPUBKEY_CHECK, BM_SETCHECK, cfg->delPubkey, 0);
-	}
-	else {
-		SendDlgItemMessage(STARTUP_CHECK, BM_SETCHECK, cfg->startupLink, 0);
-		SendDlgItemMessage(PROGRAM_CHECK, BM_SETCHECK, cfg->programLink, 0);
-		SendDlgItemMessage(DESKTOP_CHECK, BM_SETCHECK, cfg->desktopLink, 0);
-	}
-}
-
-void TInstSheet::Paste(void)
-{
-	if (hWnd) {
-		if ((resId == UNINSTALL_SHEET) == (cfg->mode == UNINSTALL_MODE))
-			return;
-		GetData();
-		Destroy();
-	}
-	resId = cfg->mode == UNINSTALL_MODE ? UNINSTALL_SHEET : INSTALL_SHEET;
-
-	Create();
-	PutData();
-}
-
-BOOL TInstSheet::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
-{
-	switch (wID)
-	{
-	case IDOK:	case IDCANCEL:
-		{
-			TWin	*top = parent;
-			while (top->GetParent())
-				top = top->GetParent();
-			top->EvCommand(wNotifyCode, wID, hwndCtl);
-		}
-		return	TRUE;
-	}
-	return	FALSE;
-}
-
-BOOL TInstSheet::EvCreate(LPARAM lParam)
-{
-	Show();
-	return	TRUE;
-}
 
 /*
-	ÉfÉBÉåÉNÉgÉäÉ_ÉCÉAÉçÉOópîƒópÉãÅ[É`Éì
+	„Éá„Ç£„É¨„ÇØ„Éà„É™„ÉÄ„Ç§„Ç¢„É≠„Ç∞Áî®Ê±éÁî®„É´„Éº„ÉÅ„É≥
 */
 void BrowseDirDlg(TWin *parentWin, UINT editCtl, char *title)
 { 
 	IMalloc			*iMalloc = NULL;
-	BROWSEINFO		brInfo;
+	BROWSEINFOW		brInfo;
 	LPITEMIDLIST	pidlBrowse;
-	char			fileBuf[MAX_PATH];
+	char			buf[MAX_PATH_U8];
+	WCHAR			wbuf[MAX_PATH];
+	Wstr			wtitle(title);
 
-	parentWin->GetDlgItemText(editCtl, fileBuf, sizeof(fileBuf));
+	parentWin->GetDlgItemTextU8(editCtl, buf, sizeof(buf));
+	U8toW(buf, wbuf, MAX_PATH);
 	if (!SUCCEEDED(SHGetMalloc(&iMalloc)))
 		return;
 
-	TBrowseDirDlg	dirDlg(fileBuf);
+	TBrowseDirDlg	dirDlg(buf);
 	brInfo.hwndOwner = parentWin->hWnd;
 	brInfo.pidlRoot = 0;
-	brInfo.pszDisplayName = fileBuf;
-	brInfo.lpszTitle = title;
+	brInfo.pszDisplayName = wbuf;
+	brInfo.lpszTitle = wtitle.Buf();
 	brInfo.ulFlags = BIF_RETURNONLYFSDIRS;
 	brInfo.lpfn = BrowseDirDlg_Proc;
 	brInfo.lParam = (LPARAM)&dirDlg;
 	brInfo.iImage = 0;
 
 	do {
-		if ((pidlBrowse = ::SHBrowseForFolder(&brInfo)) != NULL)
-		{
-			if (::SHGetPathFromIDList(pidlBrowse, fileBuf))
-				::SetDlgItemText(parentWin->hWnd, editCtl, fileBuf);
+		if ((pidlBrowse = ::SHBrowseForFolderV((BROWSEINFO *)&brInfo))) {
+			if (::SHGetPathFromIDListV(pidlBrowse, wbuf))
+				::SetDlgItemTextV(parentWin->hWnd, editCtl, wbuf);
 			iMalloc->Free(pidlBrowse);
 			break;
 		}
@@ -569,14 +504,14 @@ void BrowseDirDlg(TWin *parentWin, UINT editCtl, char *title)
 }
 
 /*
-	BrowseDirDlgópÉRÅ[ÉãÉoÉbÉN
+	BrowseDirDlgÁî®„Ç≥„Éº„É´„Éê„ÉÉ„ÇØ
 */
 int CALLBACK BrowseDirDlg_Proc(HWND hWnd, UINT uMsg, LPARAM lParam, LPARAM data)
 {
 	switch (uMsg)
 	{
 	case BFFM_INITIALIZED:
-		((TBrowseDirDlg *)data)->CreateByWnd(hWnd);
+		((TBrowseDirDlg *)data)->AttachWnd(hWnd);
 		break;
 
 	case BFFM_SELCHANGED:
@@ -588,33 +523,32 @@ int CALLBACK BrowseDirDlg_Proc(HWND hWnd, UINT uMsg, LPARAM lParam, LPARAM data)
 }
 
 /*
-	BrowseDlgópÉTÉuÉNÉâÉXê∂ê¨
+	BrowseDlgÁî®„Çµ„Éñ„ÇØ„É©„ÇπÁîüÊàê
 */
-BOOL TBrowseDirDlg::CreateByWnd(HWND _hWnd)
+BOOL TBrowseDirDlg::AttachWnd(HWND _hWnd)
 {
-	BOOL	ret = TSubClass::CreateByWnd(_hWnd);
+	BOOL	ret = TSubClass::AttachWnd(_hWnd);
 	dirtyFlg = FALSE;
 
-// ÉfÉBÉåÉNÉgÉäê›íË
-	DWORD	attr = GetFileAttributes(fileBuf);
+// „Éá„Ç£„É¨„ÇØ„Éà„É™Ë®≠ÂÆö
+	DWORD	attr = GetFileAttributesU8(fileBuf);
 	if (attr == 0xffffffff || (attr & FILE_ATTRIBUTE_DIRECTORY) == 0)
-		GetParentDir(fileBuf, fileBuf);
-	SendMessage(BFFM_SETSELECTION, TRUE, (LPARAM)fileBuf);
+		GetParentDirU8(fileBuf, fileBuf);
+	SendMessageW(BFFM_SETSELECTIONW, TRUE, (LPARAM)U8toW(fileBuf));
 	SetWindowText(IPMSG_FULLNAME);
 
-// É{É^ÉìçÏê¨
+// „Éú„Çø„É≥‰ΩúÊàê
 	RECT	tmp_rect;
 	::GetWindowRect(GetDlgItem(IDOK), &tmp_rect);
 	POINT	pt = { tmp_rect.left, tmp_rect.top };
 	::ScreenToClient(hWnd, &pt);
 	int		cx = (pt.x - 30) / 2, cy = tmp_rect.bottom - tmp_rect.top;
 
-	::CreateWindow(BUTTON_CLASS, MKDIR_STR, WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 10, pt.y, cx, cy, hWnd, (HMENU)MKDIR_BUTTON, TApp::hI, NULL);
-	::CreateWindow(BUTTON_CLASS, RMDIR_STR, WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 18 + cx, pt.y, cx, cy, hWnd, (HMENU)RMDIR_BUTTON, TApp::hI, NULL);
+	::CreateWindowU8(BUTTON_CLASS, GetLoadStrU8(IDS_MKDIR), WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 10, pt.y, cx, cy, hWnd, (HMENU)MKDIR_BUTTON, TApp::GetInstance(), NULL);
+	::CreateWindowU8(BUTTON_CLASS, GetLoadStrU8(IDS_RMDIR), WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 18 + cx, pt.y, cx, cy, hWnd, (HMENU)RMDIR_BUTTON, TApp::GetInstance(), NULL);
 
 	HFONT	hDlgFont = (HFONT)SendDlgItemMessage(IDOK, WM_GETFONT, 0, 0L);
-	if (hDlgFont)
-	{
+	if (hDlgFont) {
 		SendDlgItemMessage(MKDIR_BUTTON, WM_SETFONT, (UINT)hDlgFont, 0L);
 		SendDlgItemMessage(RMDIR_BUTTON, WM_SETFONT, (UINT)hDlgFont, 0L);
 	}
@@ -623,7 +557,7 @@ BOOL TBrowseDirDlg::CreateByWnd(HWND _hWnd)
 }
 
 /*
-	BrowseDlgóp WM_COMMAND èàóù
+	BrowseDlgÁî® WM_COMMAND Âá¶ÁêÜ
 */
 BOOL TBrowseDirDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 {
@@ -631,12 +565,12 @@ BOOL TBrowseDirDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 	{
 	case MKDIR_BUTTON:
 		{
-			char		dirBuf[MAX_PATH], path[MAX_PATH];
+			char		dirBuf[MAX_PATH_U8], path[MAX_PATH_U8];
 			TInputDlg	dlg(dirBuf, this);
-			if (dlg.Exec() == FALSE)
+			if (!dlg.Exec())
 				return	TRUE;
 			MakePath(path, fileBuf, dirBuf);
-			if (::CreateDirectory(path, NULL))
+			if (CreateDirectoryU8(path, NULL))
 			{
 				strcpy(fileBuf, path);
 				dirtyFlg = TRUE;
@@ -646,9 +580,9 @@ BOOL TBrowseDirDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 		return	TRUE;
 
 	case RMDIR_BUTTON:
-		if (::RemoveDirectory(fileBuf))
+		if (RemoveDirectoryU8(fileBuf))
 		{
-			GetParentDir(fileBuf, fileBuf);
+			GetParentDirU8(fileBuf, fileBuf);
 			dirtyFlg = TRUE;
 			PostMessage(WM_CLOSE, 0, 0);
 		}
@@ -659,18 +593,23 @@ BOOL TBrowseDirDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 
 BOOL TBrowseDirDlg::SetFileBuf(LPARAM list)
 {
-	return	::SHGetPathFromIDList((LPITEMIDLIST)list, fileBuf);
+	Wstr	wbuf(MAX_PATH);
+	BOOL	ret = ::SHGetPathFromIDListV((LPITEMIDLIST)list, wbuf.Buf());
+	if (ret) {
+		WtoU8(wbuf, fileBuf, MAX_PATH_U8);
+	}
+	return	ret;
 }
 
 /*
-	àÍçsì¸óÕ
+	‰∏ÄË°åÂÖ•Âäõ
 */
 BOOL TInputDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 {
 	switch (wID)
 	{
 	case IDOK:
-		GetDlgItemText(INPUT_EDIT, dirBuf, MAX_PATH);
+		GetDlgItemTextU8(INPUT_EDIT, dirBuf, MAX_PATH_U8);
 		EndDialog(TRUE);
 		return	TRUE;
 
@@ -682,124 +621,47 @@ BOOL TInputDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 }
 
 /*
-	êeÉfÉBÉåÉNÉgÉäéÊìæÅiïKÇ∏ÉtÉãÉpÉXÇ≈Ç†ÇÈÇ±Ç∆ÅBUNCëŒâûÅj
+	Ë¶™„Éá„Ç£„É¨„ÇØ„Éà„É™ÂèñÂæóÔºàÂøÖ„Åö„Éï„É´„Éë„Çπ„Åß„ÅÇ„Çã„Åì„Å®„ÄÇUNCÂØæÂøúÔºâ
 */
-BOOL GetParentDir(const char *srcfile, char *dir)
+BOOL GetParentDirU8(const char *srcfile, char *dir)
 {
 	char	path[MAX_BUF], *fname=NULL;
 
-	if (::GetFullPathName(srcfile, sizeof(path), path, &fname) == 0 || fname == NULL)
+	if (GetFullPathNameU8(srcfile, sizeof(path), path, &fname) == 0 || fname == NULL)
 		return	strcpy(dir, srcfile), FALSE;
 
 	if (fname - path > 3 || path[1] != ':')
 		*(fname - 1) = 0;
 	else
-		*fname = 0;		// C:\ ÇÃèÍçá
+		*fname = 0;		// C:\ „ÅÆÂ†¥Âêà
 
 	strcpy(dir, path);
 	return	TRUE;
 }
 
 /*
-	ÉfÉBÉåÉNÉgÉäÇ∆ÉtÉ@ÉCÉãÇÃòAåã
-*/
-int MakePath(char *dest, const char *dir, const char *file)
-{
-	BOOL	separetor = TRUE;
-	int		len;
-
-	if ((len = strlen(dir)) == 0)
-		return	wsprintf(dest, "%s", file);
-
-	if (dir[len -1] == '\\')	// ï\Ç»Ç«ÅA2byteñ⁄Ç™'\\'Ç≈èIÇÈï∂éöóÒëŒçÙ
-	{
-		if (len >= 2 && IsDBCSLeadByte(dir[len -2]) == FALSE)
-			separetor = FALSE;
-		else {
-			for (u_char *p=(u_char *)dir; *p && p[1]; IsDBCSLeadByte(*p) ? p+=2 : p++)
-				;
-			if (*p == '\\')
-				separetor = FALSE;
-		}
-	}
-	return	wsprintf(dest, "%s%s%s", dir, separetor ? "\\" : "", file);
-}
-
-/*
-	ÉtÉ@ÉCÉãÇÃï€ë∂Ç≥ÇÍÇƒÇ¢ÇÈÉhÉâÉCÉuéØï 
-*/
-UINT GetDriveTypeEx(const char *file)
-{
-	if (file == NULL)
-		return	GetDriveType(NULL);
-
-	if (IsUncFile(file))
-		return	DRIVE_REMOTE;
-
-	char	buf[MAX_PATH];
-	int		len = strlen(file), len2;
-
-	strcpy(buf, file);
-	do {
-		len2 = len;
-		GetParentDir(buf, buf);
-		len = strlen(buf);
-	} while (len != len2);
-
-	return	GetDriveType(buf);
-}
-
-/*
-	ëÂï∂éöè¨ï∂éöÇñ≥éãÇ∑ÇÈ strncmp
-*/
-int strncmpi(const char *str1, const char *str2, int num)
-{
-	for (int cnt=0; cnt < num; cnt++)
-	{
-		char	c1 = toupper(str1[cnt]), c2 = toupper(str2[cnt]);
-
-		if (c1 == c2)
-		{
-			if (c1)
-				continue;
-			else
-				return	0;
-		}
-		if (c1 > c2)
-			return	1;
-		else
-			return	-1;
-	}
-	return	0;
-}
-
-
-/*
-	ÉäÉìÉN
-	Ç†ÇÁÇ©Ç∂ÇﬂÅACoInitialize(NULL); Çé¿çsÇµÇƒÇ®Ç≠Ç±Ç∆
+	„É™„É≥„ÇØ
+	„ÅÇ„Çâ„Åã„Åò„ÇÅ„ÄÅCoInitialize(NULL); „ÇíÂÆüË°å„Åó„Å¶„Åä„Åè„Åì„Å®
 */
 BOOL SymLink(LPCSTR src, LPSTR dest, LPCSTR arg)
 {
 	IShellLink		*shellLink;
 	IPersistFile	*persistFile;
-	WORD			wbuf[MAX_PATH];
+	Wstr			wsrc(src), wdest(dest), warg(arg);
 	BOOL			ret = FALSE;
-	char			buf[MAX_PATH];
+	char			buf[MAX_PATH_U8];
 
-	if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (void **)&shellLink)))
-	{
-		shellLink->SetPath(src);
-		shellLink->SetArguments(arg);
-		GetParentDir(src, buf);
-		shellLink->SetWorkingDirectory(buf);
-		if (SUCCEEDED(shellLink->QueryInterface(IID_IPersistFile, (void **)&persistFile)))
-		{
-			MultiByteToWideChar(CP_ACP, 0, dest, -1, wbuf, MAX_PATH);
-			if (SUCCEEDED(persistFile->Save(wbuf, TRUE)))
-			{
+	if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLinkW, (void **)&shellLink))) {
+		shellLink->SetPath((char *)wsrc.Buf());
+		shellLink->SetArguments((char *)warg.Buf());
+		GetParentDirU8(src, buf);
+		shellLink->SetWorkingDirectory((char *)U8toW(buf));
+
+		if (SUCCEEDED(shellLink->QueryInterface(IID_IPersistFile, (void **)&persistFile))) {
+			if (SUCCEEDED(persistFile->Save(wdest, TRUE))) {
 				ret = TRUE;
-				GetParentDir(dest, buf);
-				::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH|SHCNF_FLUSH, buf, NULL);
+				GetParentDirU8(WtoU8(wdest), buf);
+				::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH|SHCNF_FLUSH, U8toA(buf), NULL);
 			}
 			persistFile->Release();
 		}
@@ -809,49 +671,156 @@ BOOL SymLink(LPCSTR src, LPSTR dest, LPCSTR arg)
 }
 
 /*
-	ÉäÉìÉNÇÃâåà
-	Ç†ÇÁÇ©Ç∂ÇﬂÅACoInitialize(NULL); Çé¿çsÇµÇƒÇ®Ç≠Ç±Ç∆
-*/
-BOOL ReadLink(LPCSTR src, LPSTR dest, LPSTR arg)
-{
-	IShellLink		*shellLink;
-	IPersistFile	*persistFile;
-	WORD			wbuf[MAX_PATH];
-	BOOL			ret = FALSE;
-
-	if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (void **)&shellLink)))
-	{
-		if (SUCCEEDED(shellLink->QueryInterface(IID_IPersistFile, (void **)&persistFile)))
-		{
-			::MultiByteToWideChar(CP_ACP, 0, src, -1, wbuf, MAX_PATH);
-			if (SUCCEEDED(persistFile->Load(wbuf, STGM_READ)))
-			{
-				if (SUCCEEDED(shellLink->GetPath(dest, MAX_PATH, NULL, SLGP_SHORTPATH)))
-				{
-					shellLink->GetArguments(arg, MAX_PATH);
-					ret = TRUE;
-				}
-			}
-			persistFile->Release();
-		}
-		shellLink->Release();
-	}
-	return	ret;
-}
-
-/*
-	ÉäÉìÉNÉtÉ@ÉCÉãçÌèú
+	„É™„É≥„ÇØ„Éï„Ç°„Ç§„É´ÂâäÈô§
 */
 BOOL DeleteLink(LPCSTR path)
 {
-	char	dir[MAX_PATH];
+	char	dir[MAX_PATH_U8];
 
-	if (::DeleteFile(path) != TRUE)
+	if (!DeleteFileU8(path))
 		return	FALSE;
 
-	GetParentDir(path, dir);
-	::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH|SHCNF_FLUSH, dir, NULL);
+	GetParentDirU8(path, dir);
+	::SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH|SHCNF_FLUSH, U8toA(dir), NULL);
 
 	return	TRUE;
 }
+
+BOOL DeflateData(BYTE *buf, DWORD size, VBuf *vbuf)
+{
+	BOOL	ret = FALSE;
+	z_stream z = {0};
+
+	if (inflateInit(&z) != Z_OK) return FALSE;
+	z.next_out = vbuf->Buf();
+	z.avail_out = vbuf->Size();
+	z.next_in = buf;
+	z.avail_in = size;
+	if (inflate(&z, Z_NO_FLUSH) == Z_STREAM_END) {
+		vbuf->SetUsedSize(vbuf->Size() - z.avail_out);
+		ret = TRUE;
+	}
+	inflateEnd(&z);
+	return	ret;
+}
+
+BYTE *FindSeparatedData(BYTE *buf, DWORD buf_size, char *fname, DWORD *size)
+{
+	char	*sep = "\n======================================================================\n";
+	int		sep_len = (int)strlen(sep);
+	int		sep_end = sep_len -1;
+	BYTE	*search_end = buf + buf_size - 1000;
+	BYTE	*p = buf;
+	int		fname_len = (int)strlen(fname);
+
+	while (p < search_end) {
+		if (p[sep_end] != '\n' && p[sep_end] != '=') {
+			p += sep_len;
+			continue;
+		}
+		if (memcmp(p, sep, sep_len) == 0) {
+			p += sep_len;
+			if ((*size = atoi((char *)p)) > 0) {
+				char *f = (char *)memchr(p, ' ', 20);
+				if (f) {
+					f++;
+					if (memcmp(f, fname, fname_len) == 0 && f[fname_len] == '\n') {
+						return	(BYTE *)f + fname_len + 1;
+					}
+				}
+			}
+		}
+		else p++;
+	}
+	return	NULL;
+}
+
+#define FILESIZE_MAX	(1024 * 1024)
+CreateStatus CreateFileBySelf(char *path, char *fname)
+{
+	HANDLE	hSelfFile = INVALID_HANDLE_VALUE;
+	HANDLE	hMap = NULL;
+	BYTE	*data = NULL;
+	BYTE	*target = NULL;
+	char	self_name[MAX_PATH] = "";
+	DWORD	selfSize = 0;
+	DWORD	size = 0;
+	CreateStatus ret = CS_BROKEN;
+
+	GetModuleFileName(::GetModuleHandle(NULL), self_name, sizeof(self_name));
+	hSelfFile = ::CreateFile(self_name, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, 0,
+							OPEN_EXISTING, 0, 0);
+	hMap = ::CreateFileMapping(hSelfFile, 0, PAGE_READONLY, 0, 0, 0);
+	data = (BYTE *)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+	if (!data) goto END;
+
+	selfSize = GetFileSize(hSelfFile, 0);
+	if ((target = FindSeparatedData(data, selfSize, fname, &size))) {
+		VBuf	vbuf(FILESIZE_MAX);
+		if (DeflateData(target, size, &vbuf)) {
+			ret = CS_ACCESS;
+			HANDLE	hDestFile = ::CreateFile(path, GENERIC_WRITE, 0, 0,
+									CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+			if (hDestFile != INVALID_HANDLE_VALUE) {
+				if (::WriteFile(hDestFile, vbuf.Buf(), vbuf.UsedSize(), &size, 0)) {
+					ret = CS_OK;
+				}
+				::CloseHandle(hDestFile);
+			}
+		}
+	}
+
+END:
+	::UnmapViewOfFile(data);
+	::CloseHandle(hMap);
+	::CloseHandle(hSelfFile);
+	return	ret;
+}
+
+/*
+	Ëµ∑Âãï„ÉÄ„Ç§„Ç¢„É≠„Ç∞
+*/
+TLaunchDlg::TLaunchDlg(LPCSTR _msg, TWin *_win) : TDlg(LAUNCH_DIALOG, _win)
+{
+	msg = strdup(_msg);
+}
+
+TLaunchDlg::~TLaunchDlg()
+{
+	free(msg);
+}
+
+/*
+	„É°„Ç§„É≥„ÉÄ„Ç§„Ç¢„É≠„Ç∞Áî® WM_INITDIALOG Âá¶ÁêÜ„É´„Éº„ÉÅ„É≥
+*/
+BOOL TLaunchDlg::EvCreate(LPARAM lParam)
+{
+	SetDlgItemText(MESSAGE_STATIC, msg);
+	if (IsWin7()) {
+		::ShowWindow(GetDlgItem(LAUNCH_BUTTON), SW_SHOW);
+	}
+
+	Show();
+	return	TRUE;
+}
+
+#define NOTIFY_SETTINGS	"shell32.dll,Options_RunDLL 5"
+
+BOOL TLaunchDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
+{
+	switch (wID)
+	{
+	case IDOK: case IDCANCEL:
+		EndDialog(wID);
+		return	TRUE;
+
+	case LAUNCH_BUTTON:
+		//ShellExecuteU8(NULL, NULL, GetLoadStr(IDS_TRAYURL), 0, 0, SW_SHOW);
+		ShellExecuteU8(NULL, "open", "rundll32.exe", NOTIFY_SETTINGS, 0, SW_SHOW);
+		EndDialog(IDOK);
+		return	TRUE;
+	}
+	return	FALSE;
+}
+
 

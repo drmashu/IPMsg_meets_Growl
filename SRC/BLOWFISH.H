@@ -1,4 +1,4 @@
-// blowfish.h     interface file for blowfish.cpp
+﻿// blowfish.h     interface file for blowfish.cpp
 // _THE BLOWFISH ENCRYPTION ALGORITHM_
 // by Bruce Schneier
 // Revised code--3/20/94
@@ -22,7 +22,9 @@
 #define BF_PKCS5	0x0020
 #define BF_BLKSIZE	8
 
+#ifndef ALIGN_SIZE
 #define ALIGN_SIZE(size, align_size) ((((size) + (align_size) -1) / (align_size)) * (align_size))
+#endif
 
 class CBlowFish
 {
@@ -37,8 +39,8 @@ public:
 			~CBlowFish();
 	void	Initialize(const BYTE *key, int keybytes);
 	DWORD	GetOutputLength(DWORD lInputLong, int mode);
-	DWORD	Encrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mode=BF_CBC|BF_PKCS5, _int64 IV=0);
-	DWORD	Decrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mode=BF_CBC|BF_PKCS5, _int64 IV=0);
+	DWORD	Encrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mode=BF_CBC|BF_PKCS5, BYTE * IV=0);
+	DWORD	Decrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mode=BF_CBC|BF_PKCS5, BYTE *IV=0);
 };
 
 // choose a byte order for your hardware

@@ -1,4 +1,4 @@
-// blowfish.cpp   C++ class implementation of the BLOWFISH encryption algorithm
+﻿// blowfish.cpp   C++ class implementation of the BLOWFISH encryption algorithm
 // _THE BLOWFISH ENCRYPTION ALGORITHM_
 // by Bruce Schneier
 // Revised code--3/20/94
@@ -151,9 +151,12 @@ inline void change_order(DWORD *val)
 	// Encrypt pIntput into pOutput.  Input length in lSize.  Returned value
 	// is length of output which will be even MOD 8 bytes.  Input buffer and
 	// output buffer can be the same, but be sure buffer length is even MOD 8.
-DWORD CBlowFish::Encrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mode, _int64 IV)
+DWORD CBlowFish::Encrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mode, BYTE *_IV)
 {
 	DWORD 	lCount, lOutSize, *dwOutput = (DWORD *)pOutput;
+	_int64	IV = 0;
+
+	if (_IV) memcpy(&IV, _IV, sizeof(IV));
 
 	if (pInput != pOutput)
 		memcpy(pOutput, pInput, lSize);
@@ -182,10 +185,13 @@ DWORD CBlowFish::Encrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mod
 
 	// Decrypt pIntput into pOutput.  Input length in lSize.  Input buffer and
 	// output buffer can be the same, but be sure buffer length is even MOD 8.
-DWORD CBlowFish::Decrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mode, _int64 IV)
+DWORD CBlowFish::Decrypt(const BYTE *pInput, BYTE *pOutput, DWORD lSize, int mode, BYTE *_IV)
 {
 	DWORD	lCount, *dwOutput = (DWORD *)pOutput;
 	_int64	prevIV = 0;
+	_int64	IV = 0;
+
+	if (_IV) memcpy(&IV, _IV, sizeof(IV));
 
 	if (pInput != pOutput)
 		memcpy(pOutput, pInput, lSize);

@@ -1,169 +1,40 @@
-static char *miscdlg_id = 
-	"@(#)Copyright (C) H.Shirouzu 1996-2004   miscdlg.cpp	Ver2.05";
+ï»¿static char *miscdlg_id = 
+	"@(#)Copyright (C) H.Shirouzu 1996-2012   miscdlg.cpp	Ver3.40";
 /* ========================================================================
 	Project  Name			: IP Messenger for Win32
 	Module Name				: Misc Dialog
 	Create					: 1996-12-15(Sun)
-	Update					: 2004-01-01(Thu)
+	Update					: 2012-04-02(Mon)
 	Copyright				: H.Shirouzu
 	Reference				: 
 	======================================================================== */
 
-#include "tlib.h"
 #include "resource.h"
 #include "ipmsg.h"
-#include "msgstr.h"
-#include "blowfish.h"
 
 int TMsgDlg::createCnt = 0;
 
 /*
-	TMsgDlg‚ÍA§–ñ‚Ì‘½‚¢MessageBox()‚Ì‘ã—p‚Æ‚µ‚Äì¬
-*/
-TMsgDlg::TMsgDlg(TWin *_parent) : TListDlg(MESSAGE_DIALOG, _parent)
-{
-	hAccel = ::LoadAccelerators(TApp::hI, (LPCSTR)IPMSG_ACCEL);
-}
-
-/*
-	I—¹ƒ‹[ƒ`ƒ“
-*/
-TMsgDlg::~TMsgDlg()
-{
-	createCnt--;
-}
-
-/*
-	Window¶¬ƒ‹[ƒ`ƒ“
-*/
-BOOL TMsgDlg::Create(char *text, char *title, int _showMode)
-{
-	showMode = _showMode;
-
-	if (TDlg::Create() == FALSE)
-		return	FALSE;
-
-	SetDlgItemText(MESSAGE_TEXT, text);
-	SetWindowText(title);
-	if (showMode == SW_SHOW) {
-		::EnableWindow(hWnd, TRUE);
-		::ShowWindow(hWnd, ((GetAsyncKeyState(VK_LBUTTON)|GetAsyncKeyState(VK_RBUTTON)|GetAsyncKeyState(VK_MBUTTON)) & 0x8000) ? SW_SHOWNOACTIVATE : SW_SHOW);
-	}
-	else {
-		::ShowWindow(hWnd, SW_SHOWMINNOACTIVE);
-		::EnableWindow(hWnd, TRUE);
-	}
-
-	if (strstr(text, "\r\n"))
-	{
-		WINDOWPLACEMENT wp;
-		wp.length = sizeof(wp);
-		::GetWindowPlacement(GetDlgItem(MESSAGE_TEXT), &wp);
-		wp.rcNormalPosition.top -= ::GetSystemMetrics(SM_CYCAPTION) / 4;
-		::SetWindowPlacement(GetDlgItem(MESSAGE_TEXT), &wp);
-	}
-	return	TRUE;
-}
-
-/*
-	WM_COMMAND CallBack
-*/
-BOOL TMsgDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
-{
-	switch (wID)
-	{
-	case MISC_ACCEL:
-	case HIDE_ACCEL:
-		::PostMessage(GetMainWnd(), WM_COMMAND, wID, 0);
-		return	TRUE;
-
-	case IDOK:
-	case IDCANCEL:
-		EndDialog(FALSE);
-		::PostMessage(GetMainWnd(), WM_MSGDLG_EXIT, (WPARAM)0, (LPARAM)this);
-		return	TRUE;
-	}
-	return	FALSE;
-}
-
-/*
-	Window ¶¬‚Ì CallBackBScreen‚Ì’†S‚ğ‹N“_‚Æ‚µ‚ÄA‚·‚Å‚ÉŠJ‚¢‚Ä‚¢‚é
-	TMsgDlg‚Ì–‡” * Caption Size‚ğ ‚¸‚ç‚µ‚Ä•\¦
-*/
-BOOL TMsgDlg::EvCreate(LPARAM lParam)
-{
-	SetDlgIcon(hWnd);
-
-	if (rect.left == CW_USEDEFAULT)
-	{
-		GetWindowRect(&rect);
-		int xsize = rect.right - rect.left, ysize = rect.bottom - rect.top;
-		int	cx = ::GetSystemMetrics(SM_CXFULLSCREEN), cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
-		int	x = (cx - xsize)/2 + createCnt * ::GetSystemMetrics(SM_CYCAPTION);
-		int y = (cy - ysize)/2 + createCnt * ::GetSystemMetrics(SM_CYCAPTION);
-
-		MoveWindow((x < 0) ? 0 : x % (cx - xsize), (y < 0) ? 0 : y % (cy - ysize), xsize, ysize, FALSE);
-	}
-
-	createCnt++;
-	return	TRUE;
-}
-
-/*
-	About Dialog‰Šú‰»ˆ—
-*/
-TAboutDlg::TAboutDlg(TWin *_parent) : TDlg(ABOUT_DIALOG, _parent)
-{
-}
-
-/*
-	Window ¶¬‚Ì CallBack
-*/
-BOOL TAboutDlg::EvCreate(LPARAM lParam)
-{
-	SetDlgIcon(hWnd);
-
-	if (rect.left == CW_USEDEFAULT)
-	{
-		GetWindowRect(&rect);
-		int xsize = rect.right - rect.left, ysize = rect.bottom - rect.top;
-		int	cx = ::GetSystemMetrics(SM_CXFULLSCREEN), cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
-		int	x = (cx - xsize)/2;
-		int y = (cy - ysize)/2;
-
-		MoveWindow((x < 0) ? 0 : x % (cx - xsize), (y < 0) ? 0 : y % (cy - ysize), xsize, ysize, FALSE);
-	}
-	else
-		MoveWindow(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, FALSE);
-
-	return	TRUE;
-}
-
-BOOL TAboutDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
-{
-	switch (wID)
-	{
-	case IDOK:
-	case IDCANCEL:
-		EndDialog(TRUE);
-		return	TRUE;
-
-	case IPMSG_ICON: case IPMSGWEB_BUTTON:
-		if (wID == IPMSGWEB_BUTTON || wNotifyCode == 1)
-			::ShellExecute(NULL, NULL, IPMSGURL_MSGSTR, NULL, NULL, SW_SHOW);
-		return	TRUE;
-	}
-	return	FALSE;
-}
-
-/*
-	listview control ‚Ì subclass‰»
-	Focus ‚ğ¸‚Á‚½‚Æ‚«‚É‚àA‘I‘ğF‚ğ•Ï‰»‚³‚¹‚È‚¢‚½‚ß‚Ì¬×H
+	listview control ã® subclassåŒ–
+	Focus ã‚’å¤±ã£ãŸã¨ãã«ã‚‚ã€é¸æŠè‰²ã‚’å¤‰åŒ–ã•ã›ãªã„ãŸã‚ã®å°ç´°å·¥
 */
 #define INVALID_INDEX	-1
 TListViewEx::TListViewEx(TWin *_parent) : TSubClassCtl(_parent)
 {
 	focus_index = INVALID_INDEX;
+}
+
+BOOL TListViewEx::AttachWnd(HWND targetWnd, DWORD addStyle)
+{
+	if (!TSubClass::AttachWnd(targetWnd)) return FALSE;
+
+	LONG_PTR dw = GetWindowLong(GWL_STYLE) | LVS_SHOWSELALWAYS;
+	SetWindowLong(GWL_STYLE, dw);
+
+	LRESULT style = SendMessage(LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0);
+	style |= addStyle;
+	SendMessage(LVM_SETEXTENDEDLISTVIEWSTYLE, 0, style);
+	return TRUE;
 }
 
 BOOL TListViewEx::EventFocus(UINT uMsg, HWND hFocusWnd)
@@ -173,12 +44,13 @@ BOOL TListViewEx::EventFocus(UINT uMsg, HWND hFocusWnd)
 	memset(&lvi, 0, sizeof(lvi));
 	lvi.mask = LVIF_STATE;
 	lvi.stateMask = LVIS_FOCUSED;
-	int	maxItem = SendMessage(LVM_GETITEMCOUNT, 0, 0);
+	int	maxItem = (int)SendMessage(LVM_GETITEMCOUNT, 0, 0);
 	int itemNo;
 
-	for (itemNo=0; itemNo < maxItem; itemNo++)
+	for (itemNo=0; itemNo < maxItem; itemNo++) {
 		if (SendMessage(LVM_GETITEMSTATE, itemNo, (LPARAM)LVIS_FOCUSED) & LVIS_FOCUSED)
 			break;
+	}
 
 	if (uMsg == WM_SETFOCUS)
 	{
@@ -196,7 +68,7 @@ BOOL TListViewEx::EventFocus(UINT uMsg, HWND hFocusWnd)
 			SendMessage(LVM_SETITEMSTATE, itemNo, (LPARAM)&lvi);
 			focus_index = itemNo;
 		}
-		return	TRUE;	// WM_KILLFOCUS ‚Í“`‚¦‚È‚¢
+		return	TRUE;	// WM_KILLFOCUS ã¯ä¼ãˆãªã„
 	}
 }
 
@@ -236,139 +108,149 @@ BOOL TListViewEx::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
 	return	FALSE;
 }
 
-/*
-	edit control ‚Ì subclass‰»
-*/
-TEditSub::TEditSub(Cfg *_cfg, TWin *_parent) : TSubClassCtl(_parent)
+int TListViewEx::InsertColumn(int idx, char *title, int width, int fmt)
 {
-	cfg = _cfg;
+	LV_COLUMNW	lvC;
+	memset(&lvC, 0, sizeof(lvC));
+	lvC.fmt      = fmt;
+	lvC.mask     = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
+	lvC.pszText  = U8toW(title);
+	lvC.cx       = width;
+	lvC.iSubItem = idx;
+	return	(int)SendMessage(LVM_INSERTCOLUMNW, idx, (LPARAM)&lvC);
 }
 
-BOOL TEditSub::EventButton(UINT uMsg, int nHitTest, POINTS pos)
+BOOL TListViewEx::DeleteColumn(int idx)
 {
-	switch (uMsg)
-	{
-	case WM_LBUTTONDBLCLK:
-		PostMessage(WM_EDIT_DBLCLK, 0, 0);
-		break;
-	}
-	return	FALSE;
+	return	(BOOL)SendMessage(LVM_DELETECOLUMN, idx, 0);
 }
 
-BOOL TEditSub::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
+int TListViewEx::GetColumnWidth(int idx)
 {
-	switch (uMsg)
-	{
-	case WM_EDIT_DBLCLK:
-		DWORD	startStr, endStr;
+	return	(int)SendMessage(LVM_GETCOLUMNWIDTH, idx, 0);
+}
 
-		SendMessage(EM_GETSEL, (WPARAM)&startStr, (LPARAM)&endStr);
-		if (startStr != endStr && endStr < MAX_UDPBUF)
-		{
-			char	*url_ptr, *buf = new char[MAX_UDPBUF], proto[MAX_NAMEBUF];
-			UrlObj	*obj = NULL;
-			BOOL	modify = FALSE;
+void TListViewEx::DeleteAllItems()
+{
+	SendMessage(LVM_DELETEALLITEMS, 0, 0);
+}
 
-#ifdef JAPANESE
-			char	*kspace = "@";
-#define IS_KSPACE(c1,c2)	(kspace[0] == c1 && kspace[1] == c2)
-#else
-#define IS_KSPACE(c1,c2)	(0)		// í‚É‹U
-#endif
-			SendMessage(WM_GETTEXT, (WPARAM)MAX_UDPBUF, (LPARAM)buf);
+BOOL TListViewEx::DeleteItem(int idx)
+{
+	return	(BOOL)SendMessage(LVM_DELETEITEM, idx, 0);
+}
 
-			// WinXP ‚Ì EDITBOX ‚Å‚Í '?' ‚â ')' ‚â '`'‚ª‘I‘ğ‹æØ‚è‚ÉB
-			// ‚±‚Á‚»‚è‚»‚ñ‚È‚Æ‚±•Ï‚¦‚é‚È‚æ...
-			// XP SP1 ‚Å‚Í‚³‚ç‚É‹L†‘S”Ê‚ª‹æØ‚è•¶š‚É‚È‚Á‚½–Í—lB‚â‚ê‚â‚êB
-			if (startStr > 0) {
-				for ( ; startStr > 0; startStr--, modify=TRUE) {
-					char	ch = buf[startStr - 1];
-					char	pre_ch = startStr >= 2 ? buf[startStr -2] : '\0';
-					if (strchr("\r\n\t ", ch) || IS_KSPACE(pre_ch, ch))
-						break;
-				}
-			}
-			if (endStr -2 < startStr || !IS_KSPACE(buf[endStr -2], buf[endStr -1])) {
-				for ( ; buf[endStr-1] != '\0' && buf[endStr-1] != ' '; endStr++, modify=TRUE) {
-					char	ch = buf[endStr];
-					char	nxt_ch = buf[endStr] != '\0' ? buf[endStr +1] : '\0';
-					if (strchr("\r\n\t ", ch) || IS_KSPACE(ch, nxt_ch))
-						break;
-				}
-			}
-			if (modify)
-				SendMessage(EM_SETSEL, (WPARAM)startStr, (LPARAM)endStr);
-			memmove(buf, buf + startStr, (int)(endStr - startStr));
-			buf[endStr - startStr] = 0;
+int TListViewEx::InsertItem(int idx, char *str, LPARAM lParam)
+{
+	LV_ITEMW		lvi = {0};
+	lvi.mask		= LVIF_TEXT|LVIF_PARAM;
+	lvi.iItem		= idx;
+	lvi.pszText		= U8toW(str);
+	lvi.lParam		= lParam;
+	return	(int)SendMessage(LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+}
 
-			if ((url_ptr = strstr(buf, URL_STR)) && (url_ptr - buf) < sizeof(proto))
-			{
-				memcpy(proto, buf, url_ptr - buf), proto[url_ptr - buf] = 0;
-				for (int cnt=0; proto[cnt]; cnt++)
-				{
-					if ((obj = SearchUrlObj(&cfg->urlList, proto + cnt)) != NULL)
-					{
-						url_ptr = buf + cnt;
-						break;
-					}
-				}
-			}
-			if (obj && *obj->program)
-			{
-				if ((int)::ShellExecute(NULL, NULL, obj->program, url_ptr ? url_ptr : buf, NULL, SW_SHOW) <= WINEXEC_ERR_MAX)
-					MessageBox(obj->program, CANTEXEC_MSGSTR, MB_OK|MB_ICONINFORMATION);
-			}
-			else if (!url_ptr && cfg->ShellExec || url_ptr && cfg->DefaultUrl)
-				::ShellExecute(NULL, NULL, url_ptr ? url_ptr : buf, NULL, NULL, SW_SHOW);
-			delete	[] buf;
+int TListViewEx::SetSubItem(int idx, int subIdx, char *str)
+{
+	LV_ITEMW		lvi = {0};
+	lvi.mask		= LVIF_TEXT;
+	lvi.iItem		= idx;
+	lvi.iSubItem	= subIdx;
+	lvi.pszText		= U8toW(str);
+	return	(int)SendMessage(LVM_SETITEMW, 0, (LPARAM)&lvi);
+}
+
+int TListViewEx::FindItem(LPARAM lParam)
+{
+	LV_FINDINFO	lfi;
+	lfi.flags	= LVFI_PARAM;
+	lfi.lParam	= lParam;
+	return	(int)SendMessage(LVM_FINDITEM, -1, (LPARAM)&lfi);
+}
+
+int TListViewEx::GetItemCount()
+{
+	return	(int)SendMessage(LVM_GETITEMCOUNT, 0, 0);
+}
+
+int TListViewEx::GetSelectedItemCount()
+{
+	return	(int)SendMessage(LVM_GETSELECTEDCOUNT, 0, 0);
+}
+
+LPARAM TListViewEx::GetItemParam(int idx)
+{
+	LV_ITEMW	lvi = {0};
+	lvi.iItem	= idx;
+	lvi.mask	= LVIF_PARAM;
+
+	if (!SendMessage(LVM_GETITEMW, 0, (LPARAM)&lvi)) return	0;
+	return	lvi.lParam;
+}
+
+BOOL TListViewEx::GetColumnOrder(int *order, int num)
+{
+	return	(int)SendMessage(LVM_GETCOLUMNORDERARRAY, num, (LPARAM)order);
+}
+
+BOOL TListViewEx::SetColumnOrder(int *order, int num)
+{
+	return	(int)SendMessage(LVM_SETCOLUMNORDERARRAY, num, (LPARAM)order);
+}
+
+BOOL TListViewEx::IsSelected(int idx)
+{
+	return	(int)SendMessage(LVM_GETITEMSTATE, idx, LVIS_SELECTED) & LVIS_SELECTED ? TRUE : FALSE;
+}
+
+
+TListHeader::TListHeader(TWin *_parent) : TSubClassCtl(_parent)
+{
+	memset(&logFont, 0, sizeof(logFont));
+}
+
+BOOL TListHeader::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	if (uMsg == HDM_LAYOUT) {
+		HD_LAYOUT *hl = (HD_LAYOUT *)lParam;
+		::CallWindowProcW((WNDPROC)oldProc, hWnd, uMsg, wParam, lParam);
+
+//		Debug("HDM_LAYOUT(USER)2 top:%d/bottom:%d diff:%d cy:%d y:%d\n", hl->prc->top, hl->prc->bottom, hl->prc->bottom - hl->prc->top, hl->pwpos->cy, hl->pwpos->y);
+
+		if (logFont.lfHeight) {
+			int	height = abs(logFont.lfHeight) + 4;
+			hl->prc->top = height;
+			hl->pwpos->cy = height;
 		}
 		return	TRUE;
 	}
 	return	FALSE;
 }
 
-
-/*
-	static control ‚Ì subclass‰»
-*/
-TSeparateSub::TSeparateSub(TWin *_parent) : TSubClassCtl(_parent)
+BOOL TListHeader::ChangeFontNotify()
 {
-	hCursor = ::LoadCursor(NULL, IDC_SIZENS);
-}
+	HFONT	hFont;
 
-BOOL TSeparateSub::EvSetCursor(HWND cursorWnd, WORD nHitTest, WORD wMouseMsg)
-{
-	::SetCursor(hCursor);
+	if (!(hFont = (HFONT)SendMessage(WM_GETFONT, 0, 0)))
+		return	FALSE;
+
+	if (::GetObject(hFont, sizeof(LOGFONT), (void *)&logFont) == 0)
+		return	FALSE;
+
+//	Debug("lfHeight=%d\n", logFont.lfHeight);
 	return	TRUE;
 }
 
-BOOL TSeparateSub::EvNcHitTest(POINTS pos, LRESULT *result)
-{
-	*result = HTCLIENT;
-	return	TRUE;	// ‚«‚¿‚ñ‚ÆƒCƒxƒ“ƒg‚ğ”ò‚Î‚·‚½‚ß(win3.1/nt3.51)
-}
-
-BOOL TSeparateSub::EventButton(UINT uMsg, int nHitTest, POINTS pos)
-{
-	switch (uMsg)
-	{
-	case WM_LBUTTONDOWN:
-		parent->SendMessage(WM_SENDDLG_RESIZE, 0, 0);
-		return	TRUE;
-	}
-	return	FALSE;
-}
-
 
 /*
-	•sİ’Ê’m•¶İ’èƒ_ƒCƒAƒƒO
+	ä¸åœ¨é€šçŸ¥æ–‡è¨­å®šãƒ€ã‚¤ã‚¢ãƒ­ã‚°
 */
 extern char	*DefaultAbsence[], *DefaultAbsenceHead[];
 
 TAbsenceDlg::TAbsenceDlg(Cfg *_cfg, TWin *_parent) : TDlg(ABSENCE_DIALOG, _parent)
 {
 	cfg = _cfg;
-	hAccel = ::LoadAccelerators(TApp::hI, (LPCSTR)IPMSG_ACCEL);
+	hAccel = ::LoadAccelerators(TApp::GetInstance(), (LPCSTR)IPMSG_ACCEL);
 }
 
 TAbsenceDlg::~TAbsenceDlg()
@@ -399,7 +281,7 @@ BOOL TAbsenceDlg::EvCreate(LPARAM lParam)
 	else
 		MoveWindow(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, FALSE);
 
-	typedef char MaxBuf[MAX_PATH];
+	typedef char MaxBuf[MAX_PATH_U8];
 	typedef char MaxHead[MAX_NAMEBUF];
 	tmpAbsenceStr = new MaxBuf[cfg->AbsenceMax];
 	tmpAbsenceHead = new MaxHead[cfg->AbsenceMax];
@@ -443,8 +325,8 @@ BOOL TAbsenceDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 		return	TRUE;
 
 	case ABSENCEINIT_BUTTON:
-		SetDlgItemText(ABSENCEHEAD_EDIT, DefaultAbsenceHead[currentChoice]);
-		SetDlgItemText(ABSENCE_EDIT, DefaultAbsence[currentChoice]);
+		SetDlgItemTextU8(ABSENCEHEAD_EDIT, DefaultAbsenceHead[currentChoice]);
+		SetDlgItemTextU8(ABSENCE_EDIT, DefaultAbsence[currentChoice]);
 		return	TRUE;
 
 	case HIDE_ACCEL:
@@ -460,12 +342,13 @@ BOOL TAbsenceDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 			{
 				char	oldAbsenceHead[MAX_NAMEBUF];
 				strcpy(oldAbsenceHead, tmpAbsenceHead[currentChoice]);
-				GetDlgItemText(ABSENCEHEAD_EDIT, tmpAbsenceHead[currentChoice], MAX_NAMEBUF);
-				GetDlgItemText(ABSENCE_EDIT, tmpAbsenceStr[currentChoice], MAX_PATH);
+				GetDlgItemTextU8(ABSENCEHEAD_EDIT, tmpAbsenceHead[currentChoice], MAX_NAMEBUF);
+				GetDlgItemTextU8(ABSENCE_EDIT, tmpAbsenceStr[currentChoice], MAX_PATH_U8);
 				if (strcmp(oldAbsenceHead, tmpAbsenceHead[currentChoice]))
 				{
 					SendDlgItemMessage(ABSENCE_LIST, LB_DELETESTRING, currentChoice, 0);
-					SendDlgItemMessage(ABSENCE_LIST, LB_INSERTSTRING, currentChoice, (LPARAM)tmpAbsenceHead[currentChoice]);
+					Wstr	head_w(tmpAbsenceHead[currentChoice], BY_UTF8);
+					SendDlgItemMessageW(ABSENCE_LIST, LB_INSERTSTRING, currentChoice, (LPARAM)head_w.Buf());
 					if (currentChoice == index)
 					{
 						SendDlgItemMessage(ABSENCE_LIST, LB_SETCURSEL, currentChoice, 0);
@@ -485,18 +368,18 @@ BOOL TAbsenceDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 }
 
 /*
-	User’è‹` Event CallBack
+	Appå®šç¾© Event CallBack
 */
-BOOL TAbsenceDlg::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
+BOOL TAbsenceDlg::EventApp(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	switch (uMsg)
 	{
 	case WM_DELAYSETTEXT:
 		{
-			int		len = strlen(tmpAbsenceStr[currentChoice]);
+			int		len = (int)strlen(tmpAbsenceStr[currentChoice]);
 
-			SetDlgItemText(ABSENCEHEAD_EDIT, tmpAbsenceHead[currentChoice]);
-			SetDlgItemText(ABSENCE_EDIT, tmpAbsenceStr[currentChoice]);
+			SetDlgItemTextU8(ABSENCEHEAD_EDIT, tmpAbsenceHead[currentChoice]);
+			SetDlgItemTextU8(ABSENCE_EDIT, tmpAbsenceStr[currentChoice]);
 			SendDlgItemMessage(ABSENCE_EDIT, EM_SETSEL, (WPARAM)len, (LPARAM)len);
 		}
 		return	TRUE;
@@ -511,7 +394,8 @@ void TAbsenceDlg::SetData(void)
 	{
 		strcpy(tmpAbsenceHead[cnt], cfg->AbsenceHead[cnt]);
 		strcpy(tmpAbsenceStr[cnt], cfg->AbsenceStr[cnt]);
-		SendDlgItemMessage(ABSENCE_LIST, LB_INSERTSTRING, (WPARAM)-1, (LPARAM)cfg->AbsenceHead[cnt]);
+		Wstr	head_w(cfg->AbsenceHead[cnt], BY_UTF8);
+		SendDlgItemMessageW(ABSENCE_LIST, LB_INSERTSTRING, (WPARAM)-1, (LPARAM)head_w.Buf());
 	}
 	currentChoice = cfg->AbsenceChoice;
 	PostMessage(WM_DELAYSETTEXT, 0, 0);
@@ -520,8 +404,8 @@ void TAbsenceDlg::SetData(void)
 
 void TAbsenceDlg::GetData(void)
 {
-	GetDlgItemText(ABSENCEHEAD_EDIT, tmpAbsenceHead[currentChoice], MAX_NAMEBUF);
-	GetDlgItemText(ABSENCE_EDIT, tmpAbsenceStr[currentChoice], MAX_PATH);
+	GetDlgItemTextU8(ABSENCEHEAD_EDIT, tmpAbsenceHead[currentChoice], MAX_NAMEBUF);
+	GetDlgItemTextU8(ABSENCE_EDIT, tmpAbsenceStr[currentChoice], MAX_PATH_U8);
 	for (int cnt=0; cnt < cfg->AbsenceMax; cnt++)
 	{
 		strcpy(cfg->AbsenceHead[cnt], tmpAbsenceHead[cnt]);
@@ -532,7 +416,7 @@ void TAbsenceDlg::GetData(void)
 
 
 /*
-	ƒ\[ƒgİ’èƒ_ƒCƒAƒƒO
+	ã‚½ãƒ¼ãƒˆè¨­å®šãƒ€ã‚¤ã‚¢ãƒ­ã‚°
 */
 TSortDlg *TSortDlg::exclusiveWnd = NULL;
 
@@ -589,31 +473,31 @@ BOOL TSortDlg::EvCreate(LPARAM lParam)
 
 void TSortDlg::SetData(void)
 {
-	SendDlgItemMessage(GROUPDISP_CHECK, BM_SETCHECK, GetItem(cfg->ColumnItems, SW_GROUP), 0);
-	SendDlgItemMessage(HOST_CHECK, BM_SETCHECK, GetItem(cfg->ColumnItems, SW_HOST), 0);
-	SendDlgItemMessage(LOGON_CHECK, BM_SETCHECK, GetItem(cfg->ColumnItems, SW_USER), 0);
-	SendDlgItemMessage(PRIORITY_CHECK, BM_SETCHECK, GetItem(cfg->ColumnItems, SW_PRIORITY), 0);
-	SendDlgItemMessage(IPADDR_CHECK, BM_SETCHECK, GetItem(cfg->ColumnItems, SW_IPADDR), 0);
-	SendDlgItemMessage(GLIDLINE_CHECK, BM_SETCHECK, cfg->GlidLineCheck, 0);
+	CheckDlgButton(GROUPDISP_CHECK, GetItem(cfg->ColumnItems, SW_GROUP));
+	CheckDlgButton(HOST_CHECK, GetItem(cfg->ColumnItems, SW_HOST));
+	CheckDlgButton(LOGON_CHECK, GetItem(cfg->ColumnItems, SW_USER));
+	CheckDlgButton(PRIORITY_CHECK, GetItem(cfg->ColumnItems, SW_PRIORITY));
+	CheckDlgButton(IPADDR_CHECK, GetItem(cfg->ColumnItems, SW_IPADDR));
+	CheckDlgButton(GRIDLINE_CHECK, cfg->GridLineCheck);
 
-	SendDlgItemMessage(GROUP_CHECK, BM_SETCHECK, !(cfg->Sort & IPMSG_NOGROUPSORTOPT), 0);
-	SendDlgItemMessage(GROUPREV_CHECK, BM_SETCHECK, (cfg->Sort & IPMSG_GROUPREVSORTOPT) != 0, 0);
-	SendDlgItemMessage(USER_RADIO, BM_SETCHECK, GET_MODE(cfg->Sort) == IPMSG_NAMESORT, 0);
-	SendDlgItemMessage(HOST_RADIO, BM_SETCHECK, GET_MODE(cfg->Sort) == IPMSG_HOSTSORT, 0);
-	SendDlgItemMessage(IPADDR_RADIO, BM_SETCHECK, GET_MODE(cfg->Sort) == IPMSG_IPADDRSORT, 0);
-	SendDlgItemMessage(SUBREV_CHECK, BM_SETCHECK, (cfg->Sort & IPMSG_SUBREVSORTOPT) != 0, 0);
-	SendDlgItemMessage(ICMP_CHECK, BM_SETCHECK, (cfg->Sort & IPMSG_ICMPSORTOPT) != 0, 0);
-	SendDlgItemMessage(KANJI_CHECK, BM_SETCHECK, !(cfg->Sort & IPMSG_NOKANJISORTOPT), 0);
+	CheckDlgButton(GROUP_CHECK, !(cfg->Sort & IPMSG_NOGROUPSORTOPT));
+	CheckDlgButton(GROUPREV_CHECK, (cfg->Sort & IPMSG_GROUPREVSORTOPT) != 0);
+	CheckDlgButton(USER_RADIO, GET_MODE(cfg->Sort) == IPMSG_NAMESORT);
+	CheckDlgButton(HOST_RADIO, GET_MODE(cfg->Sort) == IPMSG_HOSTSORT);
+	CheckDlgButton(IPADDR_RADIO, GET_MODE(cfg->Sort) == IPMSG_IPADDRSORT);
+	CheckDlgButton(SUBREV_CHECK, (cfg->Sort & IPMSG_SUBREVSORTOPT) != 0);
+	CheckDlgButton(ICMP_CHECK, (cfg->Sort & IPMSG_ICMPSORTOPT) != 0);
+	CheckDlgButton(KANJI_CHECK, !(cfg->Sort & IPMSG_NOKANJISORTOPT));
 }
 
 void TSortDlg::GetData(void)
 {
-	SetItem(&cfg->ColumnItems, SW_GROUP, SendDlgItemMessage(GROUPDISP_CHECK, BM_GETCHECK, 0, 0));
-	SetItem(&cfg->ColumnItems, SW_HOST, SendDlgItemMessage(HOST_CHECK, BM_GETCHECK, 0, 0));
-	SetItem(&cfg->ColumnItems, SW_USER, SendDlgItemMessage(LOGON_CHECK, BM_GETCHECK, 0, 0));
-	SetItem(&cfg->ColumnItems, SW_PRIORITY, SendDlgItemMessage(PRIORITY_CHECK, BM_GETCHECK, 0, 0));
-	SetItem(&cfg->ColumnItems, SW_IPADDR, SendDlgItemMessage(IPADDR_CHECK, BM_GETCHECK, 0, 0));
-	cfg->GlidLineCheck = SendDlgItemMessage(GLIDLINE_CHECK, BM_GETCHECK, 0, 0);
+	SetItem(&cfg->ColumnItems, SW_GROUP, (BOOL)SendDlgItemMessage(GROUPDISP_CHECK, BM_GETCHECK, 0, 0));
+	SetItem(&cfg->ColumnItems, SW_HOST, (BOOL)SendDlgItemMessage(HOST_CHECK, BM_GETCHECK, 0, 0));
+	SetItem(&cfg->ColumnItems, SW_USER, (BOOL)SendDlgItemMessage(LOGON_CHECK, BM_GETCHECK, 0, 0));
+	SetItem(&cfg->ColumnItems, SW_PRIORITY, (BOOL)SendDlgItemMessage(PRIORITY_CHECK, BM_GETCHECK, 0, 0));
+	SetItem(&cfg->ColumnItems, SW_IPADDR, (BOOL)SendDlgItemMessage(IPADDR_CHECK, BM_GETCHECK, 0, 0));
+	cfg->GridLineCheck = (BOOL)SendDlgItemMessage(GRIDLINE_CHECK, BM_GETCHECK, 0, 0);
 
 	cfg->Sort = 0;
 
@@ -635,150 +519,14 @@ void TSortDlg::GetData(void)
 		cfg->Sort |= IPMSG_NOKANJISORTOPT;
 }
 
-/*
-	ƒNƒŠƒbƒJƒuƒ‹URLİ’èƒ_ƒCƒAƒƒO
-*/
-TUrlDlg::TUrlDlg(Cfg *_cfg, TWin *_parent) : TDlg(URL_DIALOG, _parent)
-{
-	cfg = _cfg;
-	*currentProtocol = 0;
-}
-
-TUrlDlg::~TUrlDlg()
-{
-}
-
-BOOL TUrlDlg::EvCreate(LPARAM lParam)
-{
-	GetWindowRect(&rect);
-	int cx = ::GetSystemMetrics(SM_CXFULLSCREEN), cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
-	int x = rect.left + 10, y = rect.top + 50;
-	int xsize = rect.right - rect.left, ysize = rect.bottom - rect.top;
-	if (x + xsize > cx)
-		x = cx - xsize;
-	if (y + ysize > cy)
-		y = cy - ysize;
-
-	MoveWindow(x, y, xsize, ysize, FALSE);
-	SetData();
-	SendDlgItemMessage(URL_LIST, LB_SETCURSEL, 0, 0);
-	EvCommand(0, URL_LIST, 0);
-
-	return	TRUE;
-}
-
-BOOL TUrlDlg::EvNcDestroy(void)
-{
-	UrlObj *urlObj;
-
-	while ((urlObj = (UrlObj *)tmpUrlList.TopObj()) != NULL)
-	{
-		tmpUrlList.DelObj(urlObj);
-		delete urlObj;
-	}
-	return	TRUE;
-}
-
-BOOL TUrlDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
-{
-	switch (wID)
-	{
-	case IDOK: case SET_BUTTON:
-		GetData();
-		cfg->WriteRegistry(CFG_CLICKURL);
-		if (wID == IDOK)
-			EndDialog(TRUE);
-		return	TRUE;
-
-	case IDCANCEL:
-		EndDialog(FALSE);
-		return	TRUE;
-
-	case ADD_BUTTON:
-		{
-			char	protocol[MAX_LISTBUF], buf[MAX_LISTBUF];
-			int		index;
-			UrlObj	*obj;
-
-			if ((index = (int)SendDlgItemMessage(URL_LIST, LB_GETCURSEL, 0, 0)) != LB_ERR && SendDlgItemMessage(URL_LIST, LB_GETTEXT, (WPARAM)index, (LPARAM)protocol) != LB_ERR && (obj = SearchUrlObj(&tmpUrlList, protocol)) != NULL)
-			{
-				wsprintf(buf, EXECPROGRAM_MSGSTR, protocol);
-				OpenFileDlg(this).Exec(URL_EDIT, buf, OPENFILEPRG_MSGSTR);
-			}
-		}
-		return	TRUE;
-
-	case URL_LIST:
-		{
-			char	protocol[MAX_LISTBUF];
-			int		index;
-			UrlObj	*obj;
-
-			if ((index = (int)SendDlgItemMessage(URL_LIST, LB_GETCURSEL, 0, 0)) != LB_ERR && SendDlgItemMessage(URL_LIST, LB_GETTEXT, (WPARAM)index, (LPARAM)protocol) != LB_ERR && (obj = SearchUrlObj(&tmpUrlList, protocol)) != NULL)
-			{
-				SetCurrentData();
-				SetDlgItemText(URL_EDIT, obj->program);
-				strncpyz(currentProtocol, protocol, sizeof(currentProtocol));
-			}
-		}
-		return	TRUE;
-	}
-
-	return	FALSE;
-}
-
-void TUrlDlg::SetCurrentData(void)
-{
-	UrlObj	*obj;
-
-	if ((obj = SearchUrlObj(&tmpUrlList, currentProtocol)) != NULL)
-		GetDlgItemText(URL_EDIT, obj->program, sizeof(obj->program));
-}
-
-void TUrlDlg::SetData(void)
-{
-	for (UrlObj *obj = (UrlObj *)cfg->urlList.TopObj(); obj != NULL; obj = (UrlObj *)cfg->urlList.NextObj(obj))
-	{
-		UrlObj *tmp_obj = new UrlObj;
-		strcpy(tmp_obj->protocol, obj->protocol);
-		strcpy(tmp_obj->program, obj->program);
-		tmpUrlList.AddObj(tmp_obj);
-
-		SendDlgItemMessage(URL_LIST, LB_INSERTSTRING, (WPARAM)-1, (LPARAM)obj->protocol);
-	}
-	SendDlgItemMessage(DEFAULTURL_CHECK, BM_SETCHECK, cfg->DefaultUrl, 0);
-	SendDlgItemMessage(SHELLEXEC_CHECK, BM_SETCHECK, cfg->ShellExec, 0);
-}
-
-void TUrlDlg::GetData(void)
-{
-	SetCurrentData();
-
-	for (UrlObj *tmp_obj = (UrlObj *)tmpUrlList.TopObj(); tmp_obj != NULL; tmp_obj = (UrlObj *)tmpUrlList.NextObj(tmp_obj))
-	{
-		UrlObj *obj = SearchUrlObj(&cfg->urlList, tmp_obj->protocol);
-
-		if (obj == NULL)
-		{
-			obj = new UrlObj;
-			cfg->urlList.AddObj(obj);
-			strcpy(obj->protocol, tmp_obj->protocol);
-		}
-		strcpy(obj->program, tmp_obj->program);
-	}
-	cfg->DefaultUrl = (int)SendDlgItemMessage(DEFAULTURL_CHECK, BM_GETCHECK, 0, 0);
-	cfg->ShellExec = (int)SendDlgItemMessage(SHELLEXEC_CHECK, BM_GETCHECK, 0, 0);
-}
-
-
-// ƒpƒXƒ[ƒhŠm”F—p
+// ãƒ‘ã‚¹ãƒ¯ãƒ¼ãƒ‰ç¢ºèªç”¨
 TPasswordDlg::TPasswordDlg(Cfg *_cfg, TWin *_parent) : TDlg(PASSWORD_DIALOG, _parent)
 {
 	cfg = _cfg;
 	outbuf = NULL;
 }
 
-// ’P‚È‚éƒpƒXƒ[ƒh“ü—Í—p
+// å˜ãªã‚‹ãƒ‘ã‚¹ãƒ¯ãƒ¼ãƒ‰å…¥åŠ›ç”¨
 TPasswordDlg::TPasswordDlg(char *_outbuf, TWin *_parent) : TDlg(PASSWORD_DIALOG, _parent)
 {
 	cfg = NULL;
@@ -794,13 +542,13 @@ BOOL TPasswordDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 			char	_buf[MAX_NAMEBUF];
 			char	*buf = outbuf ? outbuf : _buf;
 
-			GetDlgItemText(PASSWORD_EDIT, buf, MAX_NAMEBUF);
+			GetDlgItemTextU8(PASSWORD_EDIT, buf, MAX_NAMEBUF);
 			if (cfg)
 			{
 				if (CheckPassword(cfg->PasswordStr, buf))
 					EndDialog(TRUE);
 				else
-					SetDlgItemText(PASSWORD_EDIT, ""), MessageBox(CANTAUTH_MSGSTR);
+					SetDlgItemTextU8(PASSWORD_EDIT, ""), MessageBoxU8(GetLoadStrU8(IDS_CANTAUTH));
 			}
 			else EndDialog(TRUE);
 		}
@@ -830,399 +578,162 @@ BOOL TPasswordDlg::EvCreate(LPARAM lParam)
 	return	TRUE;
 }
 
-TPasswdChangeDlg::TPasswdChangeDlg(Cfg *_cfg, TWin *_parent) : TDlg(PASSWDCHANGE_DIALOG, _parent)
+
+/*
+	TMsgDlgã¯ã€åˆ¶ç´„ã®å¤šã„MessageBoxU8()ã®ä»£ç”¨ã¨ã—ã¦ä½œæˆ
+*/
+TMsgDlg::TMsgDlg(TWin *_parent) : TListDlg(MESSAGE_DIALOG, _parent)
 {
-	cfg = _cfg;
+	hAccel = ::LoadAccelerators(TApp::GetInstance(), (LPCSTR)IPMSG_ACCEL);
 }
 
-BOOL TPasswdChangeDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
+/*
+	çµ‚äº†ãƒ«ãƒ¼ãƒãƒ³
+*/
+TMsgDlg::~TMsgDlg()
+{
+	createCnt--;
+}
+
+/*
+	Windowç”Ÿæˆãƒ«ãƒ¼ãƒãƒ³
+*/
+BOOL TMsgDlg::Create(char *text, char *title, int _showMode)
+{
+	showMode = _showMode;
+
+	if (!TDlg::Create()) return	FALSE;
+
+	SetDlgItemTextU8(MESSAGE_TEXT, text);
+	SetWindowTextU8(title);
+	if (showMode == SW_SHOW) {
+		DWORD	key =	GetAsyncKeyState(VK_LBUTTON) |
+						GetAsyncKeyState(VK_RBUTTON) |
+						GetAsyncKeyState(VK_MBUTTON);
+		::EnableWindow(hWnd, TRUE);
+		::ShowWindow(hWnd, (key & 0x8000) ? SW_SHOWNOACTIVATE : SW_SHOW);
+	}
+	else {
+		::ShowWindow(hWnd, SW_SHOWMINNOACTIVE);
+		::EnableWindow(hWnd, TRUE);
+	}
+
+	if (strstr(text, "\r\n"))
+	{
+		WINDOWPLACEMENT wp;
+		wp.length = sizeof(wp);
+		::GetWindowPlacement(GetDlgItem(MESSAGE_TEXT), &wp);
+		wp.rcNormalPosition.top -= ::GetSystemMetrics(SM_CYCAPTION) / 4;
+		::SetWindowPlacement(GetDlgItem(MESSAGE_TEXT), &wp);
+	}
+	return	TRUE;
+}
+
+/*
+	WM_COMMAND CallBack
+*/
+BOOL TMsgDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 {
 	switch (wID)
 	{
-	case IDOK:
-		char	buf[MAX_NAMEBUF], buf2[MAX_NAMEBUF];
-
-		GetDlgItemText(OLDPASSWORD_EDIT, buf, sizeof(buf));
-		if (CheckPassword(cfg->PasswordStr, buf))
-		{
-			GetDlgItemText(NEWPASSWORD_EDIT, buf, sizeof(buf));
-			GetDlgItemText(NEWPASSWORD_EDIT2, buf2, sizeof(buf2));
-			if (strcmp(buf, buf2) == 0)
-				MakePassword(buf, cfg->PasswordStr);
-			else
-				return	MessageBox(NOTSAMEPASS_MSGSTR), TRUE;
-			cfg->WriteRegistry(CFG_GENERAL);
-			EndDialog(TRUE);
-		}
-		else
-			SetDlgItemText(PASSWORD_EDIT, ""), MessageBox(CANTAUTH_MSGSTR);
+	case MISC_ACCEL:
+	case HIDE_ACCEL:
+		::PostMessage(GetMainWnd(), WM_COMMAND, wID, 0);
 		return	TRUE;
 
+	case IDOK:
 	case IDCANCEL:
 		EndDialog(FALSE);
+		::PostMessage(GetMainWnd(), WM_MSGDLG_EXIT, (WPARAM)0, (LPARAM)this);
 		return	TRUE;
 	}
 	return	FALSE;
 }
 
-BOOL TPasswdChangeDlg::EvCreate(LPARAM lParam)
+/*
+	Window ç”Ÿæˆæ™‚ã® CallBackã€‚Screenã®ä¸­å¿ƒã‚’èµ·ç‚¹ã¨ã—ã¦ã€ã™ã§ã«é–‹ã„ã¦ã„ã‚‹
+	TMsgDlgã®æšæ•° * Caption Sizeã‚’ ãšã‚‰ã—ã¦è¡¨ç¤º
+*/
+BOOL TMsgDlg::EvCreate(LPARAM lParam)
 {
-	GetWindowRect(&rect);
-	MoveWindow(rect.left +50, rect.top +100, rect.right - rect.left, rect.bottom - rect.top, FALSE);
+	SetDlgIcon(hWnd);
 
-	if (*cfg->PasswordStr == 0)
-		::EnableWindow(GetDlgItem(OLDPASSWORD_EDIT), FALSE);
+	if (rect.left == CW_USEDEFAULT)
+	{
+		GetWindowRect(&rect);
+		int xsize = rect.right - rect.left, ysize = rect.bottom - rect.top;
+		int	cx = ::GetSystemMetrics(SM_CXFULLSCREEN);
+		int	cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
+		int	x = (cx - xsize)/2 + createCnt * ::GetSystemMetrics(SM_CYCAPTION);
+		int y = (cy - ysize)/2 + createCnt * ::GetSystemMetrics(SM_CYCAPTION);
 
+		MoveWindow((x < 0) ? 0 : x, (y < 0) ? 0 : y, xsize, ysize,
+					FALSE);
+	}
+
+	createCnt++;
 	return	TRUE;
 }
 
-
-BOOL CheckPassword(const char *cfgPasswd, const char *inputPasswd)
-{
-	char	buf[MAX_NAMEBUF];
-
-	MakePassword(inputPasswd, buf);
-
-	return	strcmp(buf, cfgPasswd) == 0 ? TRUE : FALSE;
-}
-
-void MakePassword(const char *inputPasswd, char *outputPasswd)
-{
-	while (*inputPasswd)	// ‰Â‹t‚¾‚¼...DESƒ‰ƒCƒuƒ‰ƒŠ‚ª‚ ‚ê‚Î‚¢‚¢‚Ì‚É
-		*outputPasswd++ = ((~*inputPasswd++) & 0x7f); //ƒŒƒWƒXƒgƒŠ‚ÌƒXƒgƒŠƒ“ƒOŒ^‚Í‚Wƒrƒbƒg–Ú‚ğŒ™‚¤(;_;)
-
-	*outputPasswd = 0;
-}
-
-
 /*
-	nul•¶š‚ğ•K‚¸•t—^‚·‚é strncpy
+	About DialogåˆæœŸåŒ–å‡¦ç†
 */
-char *strncpyz(char *dest, const char *src, int num)
+TAboutDlg::TAboutDlg(TWin *_parent) : TDlg(ABOUT_DIALOG, _parent)
 {
-	char	*sv = dest;
-
-	while (num-- > 0)
-		if ((*dest++ = *src++) == '\0')
-			return	sv;
-
-	if (sv != dest)		// num > 0
-		*(dest -1) = 0;
-	return	sv;
 }
 
 /*
-	‘å•¶š¬•¶š‚ğ–³‹‚·‚é strncmp
+	Window ç”Ÿæˆæ™‚ã® CallBack
 */
-int strncmpi(const char *str1, const char *str2, int num)
+BOOL TAboutDlg::EvCreate(LPARAM lParam)
 {
-	for (int cnt=0; cnt < num; cnt++)
+	SetDlgIcon(hWnd);
+
+	char	buf[512], buf2[512];
+	GetDlgItemTextU8(ABOUT_TEXT, buf, sizeof(buf));
+	wsprintf(buf2, buf, GetVersionStr());
+	SetDlgItemTextU8(ABOUT_TEXT, buf2);
+
+	if (rect.left == CW_USEDEFAULT)
 	{
-		char	c1 = toupper(str1[cnt]), c2 = toupper(str2[cnt]);
+		GetWindowRect(&rect);
+		int xsize = rect.right - rect.left, ysize = rect.bottom - rect.top;
+		int	cx = ::GetSystemMetrics(SM_CXFULLSCREEN);
+		int	cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
+		int	x = (cx - xsize)/2;
+		int y = (cy - ysize)/2;
 
-		if (c1 == c2)
-		{
-			if (c1)
-				continue;
-			else
-				return	0;
-		}
-		if (c1 > c2)
-			return	1;
-		else
-			return	-1;
-	}
-	return	0;
-}
-
-/*
-	URLŒŸõƒ‹[ƒ`ƒ“
-*/
-UrlObj *SearchUrlObj(TList *list, char *protocol)
-{
-	for (UrlObj *obj = (UrlObj *)list->TopObj(); obj != NULL; obj = (UrlObj *)list->NextObj(obj))
-		if (stricmp(obj->protocol, protocol) == 0)
-			return	obj;
-
-	return	NULL;
-}
-
-/*
-	ƒ_ƒCƒAƒƒO—pƒAƒCƒRƒ“İ’è
-*/
-void SetDlgIcon(HWND hWnd)
-{
-	static HICON	oldHIcon = NULL;
-
-	if (oldHIcon != TMainWin::GetIPMsgIcon())
-	{
-		oldHIcon = TMainWin::GetIPMsgIcon();
-		::SetClassLong(hWnd, GCL_HICON, (LONG)oldHIcon);
-	}
-}
-
-/*
-	ƒƒO‹L˜^—p‚Ì HostEntry•\¦•¶š—ñ
-*/
-void MakeListString(Cfg *cfg, HostSub *hostSub, THosts *hosts, char *buf)
-{
-	Host	*host;
-
-	if ((host = hosts->GetHostByAddr(hostSub)) && IsSameHost(hostSub, &host->hostSub)
-		/* || (host = cfg->priorityHosts.GetHostByName(hostSub)) != NULL */)
-		MakeListString(cfg, host, buf);
-	else {
-		Host	host;
-
-		memset(&host, 0, sizeof(host));
-		host.hostSub = *hostSub;
-		MakeListString(cfg, &host, buf);
-	}
-}
-
-/*
-	ƒƒO‹L˜^—p‚Ì HostEntry•\¦•¶š—ñ
-*/
-void MakeListString(Cfg *cfg, Host *host, char *buf)
-{
-	char	*fmt = "%s ";
-
-	if (*host->nickName)
-	{
-		if (cfg->NickNameCheck == IPMSG_NICKNAME)
-			buf += wsprintf(buf, fmt, host->nickName);
-		else {
-			char	tmp_name[MAX_LISTBUF];
-			wsprintf(tmp_name, "%s[%s]", host->nickName, host->hostSub.userName);
-			buf += wsprintf(buf, fmt, tmp_name);
-		}
+		MoveWindow((x < 0) ? 0 : x, (y < 0) ? 0 : y, xsize, ysize, FALSE);
 	}
 	else
-		buf += wsprintf(buf, fmt, host->hostSub.userName);
-
-	if (host->hostStatus & IPMSG_ABSENCEOPT)
-		*buf++ = '*';
-
-	buf += wsprintf(buf, "(%s%s%s", host->groupName, *host->groupName ? "/":"", host->hostSub.hostName);
-
-	if (cfg->IPAddrCheck)
-		buf += wsprintf(buf, "/%s", inet_ntoa(*(LPIN_ADDR)&host->hostSub.addr));
-
-	strcpy(buf, ")");
-}
-
-/*
-	IME §Œä
-*/
-BOOL SetImeOpenStatus(HWND hWnd, BOOL flg)
-{
-	BOOL ret = FALSE;
-
-#if defined(JAPANESE) && defined(WIN32)
-	HIMC hImc;
-
-	if ((hImc = ImmGetContext(hWnd)) != NULL)
-	{
-		ret = ImmSetOpenStatus(hImc, flg);
-		ImmReleaseContext(hWnd, hImc);
-	}
-#endif
-	return	ret;
-}
-
-BOOL GetImeOpenStatus(HWND hWnd)
-{
-	BOOL ret = FALSE;
-
-#if defined(JAPANESE) && defined(WIN32)
-	HIMC hImc;
-
-	if ((hImc = ImmGetContext(hWnd)) != NULL)
-	{
-		ret = ImmGetOpenStatus(hImc);
-		ImmReleaseContext(hWnd, hImc);
-	}
-#endif
-	return	ret;
-}
-
-/*
-	ƒzƒbƒgƒL[İ’è
-*/
-BOOL SetHotKey(Cfg *cfg)
-{
-	if (cfg->HotKeyCheck)
-	{
-		RegisterHotKey(GetMainWnd(), WM_SENDDLG_OPEN, cfg->HotKeyModify, cfg->HotKeySend);
-		RegisterHotKey(GetMainWnd(), WM_RECVDLG_OPEN, cfg->HotKeyModify, cfg->HotKeyRecv);
-		RegisterHotKey(GetMainWnd(), WM_DELMISCDLG, cfg->HotKeyModify, cfg->HotKeyMisc);
-	}
-	else {
-		UnregisterHotKey(GetMainWnd(), WM_SENDDLG_OPEN);
-		UnregisterHotKey(GetMainWnd(), WM_RECVDLG_OPEN);
-		UnregisterHotKey(GetMainWnd(), WM_DELMISCDLG);
-	}
-	return	TRUE;
-}
-
-/*
-	Host1 ‚Æ Host2 ‚ª“¯ˆê‚©‚Ç‚¤‚©‚ğ”äŠr
-*/
-BOOL IsSameHost(HostSub *hostSub1, HostSub *hostSub2)
-{
-	if (stricmp(hostSub1->hostName, hostSub2->hostName))
-		return	FALSE;
-
-	return	stricmp(hostSub1->userName, hostSub2->userName) ? FALSE : TRUE;
-}
-
-/*
-	RECT -> WINPOS
-*/
-void RectToWinPos(const RECT *rect, WINPOS *wpos)
-{
-	wpos->x = rect->left, wpos->y = rect->top;
-	wpos->cx = rect->right - rect->left;
-	wpos->cy = rect->bottom - rect->top;
-}
-
-/*
-	host array class
-*/
-THosts::THosts(void)
-{
-	hostCnt = 0;
-	memset(array, 0, sizeof(array));
-	for (int kind=0; kind < MAX_ARRAY; kind++)
-		enable[kind] = FALSE;
-}
-
-THosts::~THosts()
-{
-	for (int kind=0; kind < MAX_ARRAY; kind++) {
-		if (array[kind])
-			free(array[kind]);
-	}
-}
-
-
-int THosts::Cmp(HostSub *hostSub1, HostSub *hostSub2, Kind kind)
-{
-	switch (kind) {
-	case NAME: case NAME_ADDR:
-		{
-			int	cmp;
-			if (cmp = stricmp(hostSub1->userName, hostSub2->userName))
-				return	cmp;
-			if ((cmp = stricmp(hostSub1->hostName, hostSub2->hostName)) || kind == NAME)
-				return	cmp;
-		}	// if cmp == 0 && kind == NAME_ADDR, through...
-	case ADDR:
-		if (hostSub1->addr > hostSub2->addr)
-			return	1;
-		if (hostSub1->addr < hostSub2->addr)
-			return	-1;
-		if (hostSub1->portNo > hostSub2->portNo)
-			return	1;
-		if (hostSub1->portNo < hostSub2->portNo)
-			return	-1;
-		return	0;
-	}
-	return	-1;
-}
-
-Host *THosts::Search(Kind kind, HostSub *hostSub, int *insertIndex)
-{
-	int	min = 0, max = hostCnt -1, cmp, tmpIndex;
-
-	if (insertIndex == NULL)
-		insertIndex = &tmpIndex;
-
-	while (min <= max)
-	{
-		*insertIndex = (min + max) / 2;
-
-		if ((cmp = Cmp(hostSub, &array[kind][*insertIndex]->hostSub, kind)) == 0)
-			return	array[kind][*insertIndex];
-		else if (cmp > 0)
-			min = *insertIndex +1;
-		else
-			max = *insertIndex -1;
-	}
-
-	*insertIndex = min;
-	return	NULL;
-}
-
-BOOL THosts::AddHost(Host *host)
-{
-	int		insertIndex[MAX_ARRAY];
-
-// ‚·‚×‚Ä‚ÌƒCƒ“ƒfƒbƒNƒXí—Ş‚Å‚ÌŠm”F‚ğæ‚És‚¤
-	for (int kind=0; kind < MAX_ARRAY; kind++) {
-		if (enable[kind] == FALSE)
-			continue;
-		if (Search((Kind)kind, &host->hostSub, &insertIndex[kind]) != NULL)
-			return	FALSE;
-	}
-
-#define BIG_ALLOC	100
-	for (kind=0; kind < MAX_ARRAY; kind++) {
-		if (enable[kind] == FALSE)
-			continue;
-		if ((hostCnt % BIG_ALLOC) == 0)
-		{
-			Host	**tmpArray = (Host **)realloc(array[kind], (hostCnt + BIG_ALLOC) * sizeof(Host *));
-			if (tmpArray == NULL)
-				return	FALSE;
-			array[kind] = tmpArray;
-		}
-		memmove(array[kind] + insertIndex[kind] + 1, array[kind] + insertIndex[kind], (hostCnt - insertIndex[kind]) * sizeof(Host *));
-		array[kind][insertIndex[kind]] = host;
-	}
-	host->RefCnt(1);
-	hostCnt++;
-	return	TRUE;
-}
-
-BOOL THosts::DelHost(Host *host)
-{
-	int		insertIndex[MAX_ARRAY];
-
-// ‚·‚×‚Ä‚ÌƒCƒ“ƒfƒbƒNƒXí—Ş‚Å‚ÌŠm”F‚ğæ‚És‚¤
-	for (int kind=0; kind < MAX_ARRAY; kind++) {
-		if (enable[kind] == FALSE)
-			continue;
-		if (Search((Kind)kind, &host->hostSub, &insertIndex[kind]) == NULL)
-			return	FALSE;
-	}
-
-	hostCnt--;
-
-	for (kind=0; kind < MAX_ARRAY; kind++) {
-		if (enable[kind] == FALSE)
-			continue;
-		memmove(array[kind] + insertIndex[kind], array[kind] + insertIndex[kind] + 1, (hostCnt - insertIndex[kind]) * sizeof(Host *));
-	}
-	host->RefCnt(-1);
+		MoveWindow(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, FALSE);
 
 	return	TRUE;
 }
 
-BOOL THosts::PriorityHostCnt(int priority, int range)
+BOOL TAboutDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 {
-	int		member = 0;
+	switch (wID)
+	{
+	case IDOK:
+	case IDCANCEL:
+		EndDialog(TRUE);
+		return	TRUE;
 
-	for (int cnt=0; cnt < hostCnt; cnt++)
-		if (array[NAME][cnt]->priority >= priority && array[NAME][cnt]->priority < priority + range)
-			member++;
-	return	member;
+	case IPMSG_ICON: case IPMSGWEB_BUTTON:
+		if (wID == IPMSGWEB_BUTTON || wNotifyCode == 1)
+			ShellExecuteU8(NULL, NULL, GetLoadStrU8(IDS_IPMSGURL), NULL, NULL, SW_SHOW);
+		return	TRUE;
+	}
+	return	FALSE;
 }
+
 
 TFindDlg::TFindDlg(Cfg *_cfg, TSendDlg *_parent) : TDlg(FIND_DIALOG, _parent)
 {
 	cfg = _cfg;
 	sendDlg = _parent;
+	imeStatus = FALSE;
 }
 
 BOOL TFindDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
@@ -1231,44 +742,68 @@ BOOL TFindDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 	{
 	case IDOK:
 		int		cnt;
-		GetDlgItemText(FIND_COMBO, cfg->FindStr[0], MAX_NAMEBUF);
-		cfg->FindAll = SendDlgItemMessage(ALLFIND_CHECK, BM_GETCHECK, 0, 0);
+		cfg->FindAll = (BOOL)SendDlgItemMessage(ALLFIND_CHECK, BM_GETCHECK, 0, 0);
 
-		if (sendDlg->FindHost(cfg->FindStr[0], cfg->FindAll)) {
-			for (cnt=1; cnt < cfg->FindMax; cnt++)
-				if (stricmp(cfg->FindStr[cnt], cfg->FindStr[0]) == 0)
-					break;
-			memmove(cfg->FindStr[2], cfg->FindStr[1], (cnt == cfg->FindMax ? cnt-2 : cnt-1) * MAX_NAMEBUF);
+		if (sendDlg->SelectFilterHost()) {
+			GetDlgItemTextU8(FIND_COMBO, cfg->FindStr[0], MAX_NAMEBUF);
+			for (cnt=1; cnt < cfg->FindMax; cnt++) {
+				if (stricmp(cfg->FindStr[cnt], cfg->FindStr[0]) == 0) break;
+			}
+			memmove(cfg->FindStr[2], cfg->FindStr[1],
+					(cnt == cfg->FindMax ? cnt-2 : cnt-1) * MAX_NAMEBUF);
 			memcpy(cfg->FindStr[1], cfg->FindStr[0], MAX_NAMEBUF);
-			DWORD	start, end;		// ƒGƒfƒBƒbƒg•”‚Ì‘I‘ğó‘Ô‚Ì•Û‘¶
+			DWORD	start, end;		// ã‚¨ãƒ‡ã‚£ãƒƒãƒˆéƒ¨ã®é¸æŠçŠ¶æ…‹ã®ä¿å­˜
 			SendDlgItemMessage(FIND_COMBO, CB_GETEDITSEL, (WPARAM)&start, (LPARAM)&end);
-			// CB_RESETCONTENT ‚ÅƒGƒfƒBƒbƒg•”‚ªƒNƒŠƒA
-			// ‚È‚¨ADELETESTRING ‚Å‚à edit “¯–¼string‚Ìê‡A“¯‚¶‚­ƒNƒŠƒA‚³‚ê‚é
+			// CB_RESETCONTENT ã§ã‚¨ãƒ‡ã‚£ãƒƒãƒˆéƒ¨ãŒã‚¯ãƒªã‚¢
+			// ãªãŠã€DELETESTRING ã§ã‚‚ edit åŒåstringã®å ´åˆã€åŒã˜ãã‚¯ãƒªã‚¢ã•ã‚Œã‚‹
 			SendDlgItemMessage(FIND_COMBO, CB_RESETCONTENT, 0, 0);
-			for (cnt=1; cnt < cfg->FindMax && cfg->FindStr[cnt][0]; cnt++)
-				SendDlgItemMessage(FIND_COMBO, CB_INSERTSTRING, cnt-1, (LPARAM)cfg->FindStr[cnt]);
-			SetDlgItemText(FIND_COMBO, cfg->FindStr[0]);
+			for (cnt=1; cnt < cfg->FindMax && cfg->FindStr[cnt][0]; cnt++) {
+				Wstr	find_w(cfg->FindStr[cnt], BY_UTF8);
+				SendDlgItemMessageW(FIND_COMBO, CB_INSERTSTRING, cnt-1, (LPARAM)find_w.Buf());
+			}
+			SetDlgItemTextU8(FIND_COMBO, cfg->FindStr[0]);
 			SendDlgItemMessage(FIND_COMBO, CB_SETEDITSEL, 0, MAKELPARAM(start, end));
 		}
 		cfg->WriteRegistry(CFG_FINDHIST);
 		return	TRUE;
 
 	case IDCANCEL: case CLOSE_BUTTON:
+		sendDlg->FilterHost("");
 		EndDialog(FALSE);
+		return	TRUE;
+
+	case FIND_COMBO:
+		if (wNotifyCode == CBN_EDITCHANGE) {
+			FilterHost();
+		}
+		else if (wNotifyCode == CBN_SELCHANGE) {
+			PostMessage(WM_FINDDLG_DELAY, 0, 0);
+		}
 		return	TRUE;
 	}
 
 	return	FALSE;
 }
 
+int TFindDlg::FilterHost()
+{
+	char	buf[MAX_NAMEBUF] = "";
+	GetDlgItemTextU8(FIND_COMBO, buf, sizeof(buf));
+	cfg->FindAll = (BOOL)SendDlgItemMessage(ALLFIND_CHECK, BM_GETCHECK, 0, 0);
+	return	sendDlg->FilterHost(buf);
+}
+
+
 BOOL TFindDlg::EvCreate(LPARAM lParam)
 {
-	SendDlgItemMessage(ALLFIND_CHECK, BM_SETCHECK, cfg->FindAll, 0);
+	CheckDlgButton(ALLFIND_CHECK, cfg->FindAll);
 
-	for (int cnt=1; cnt < cfg->FindMax && cfg->FindStr[cnt][0]; cnt++)
-		SendDlgItemMessage(FIND_COMBO, CB_INSERTSTRING, (WPARAM)cnt-1, (LPARAM)cfg->FindStr[cnt]);
-	if (cfg->FindStr[0][0])
-		SetDlgItemText(FIND_COMBO, cfg->FindStr[0]);
+	for (int cnt=1; cnt < cfg->FindMax && cfg->FindStr[cnt][0]; cnt++) {
+		Wstr	find_w(cfg->FindStr[cnt], BY_UTF8);
+		SendDlgItemMessageW(FIND_COMBO, CB_INSERTSTRING, (WPARAM)cnt-1, (LPARAM)find_w.Buf());
+	}
+//	if (cfg->FindStr[0][0])
+//		SetDlgItemTextU8(FIND_COMBO, cfg->FindStr[0]);
 
 	if (rect.left == CW_USEDEFAULT) {
 		GetWindowRect(&rect);
@@ -1279,83 +814,115 @@ BOOL TFindDlg::EvCreate(LPARAM lParam)
 	}
 	MoveWindow(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, FALSE);
 	Show();
+	if (cfg->ControlIME == 1) {
+		imeStatus = GetImeOpenStatus(hWnd);
+		if (imeStatus) SetImeOpenStatus(hWnd, FALSE);
+	}
+
 	return	TRUE;
 }
 
-/*
-	ƒtƒ@ƒCƒ‹ƒ_ƒCƒAƒƒO—p”Ä—pƒ‹[ƒ`ƒ“
-*/
-BOOL OpenFileDlg::Exec(UINT editCtl, char *title, char *filter, char *defaultDir)
+BOOL TFindDlg::EvDestroy()
 {
-	char buf[MAX_PATH];
+	if (imeStatus) {
+		SetImeOpenStatus(hWnd, TRUE);
+	}
+	return	FALSE;
+}
+
+BOOL TFindDlg::EventApp(UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	if (uMsg == WM_FINDDLG_DELAY) {
+		FilterHost();
+		return	TRUE;
+	}
+	return	FALSE;
+}
+
+/*
+	ãƒ•ã‚¡ã‚¤ãƒ«ãƒ€ã‚¤ã‚¢ãƒ­ã‚°ç”¨æ±ç”¨ãƒ«ãƒ¼ãƒãƒ³
+*/
+BOOL OpenFileDlg::Exec(UINT editCtl, char *title, char *filter, char *defaultDir, char *defaultExt)
+{
+	char buf[MAX_PATH_U8];
 
 	if (parent == NULL)
 		return FALSE;
 
-	parent->GetDlgItemText(editCtl, buf, sizeof(buf));
+	parent->GetDlgItemTextU8(editCtl, buf, sizeof(buf));
 
-	if (Exec(buf, title, filter, defaultDir) == FALSE)
+	if (!Exec(buf, sizeof(buf), title, filter, defaultDir, defaultExt))
 		return	FALSE;
 
-	parent->SetDlgItemText(editCtl, buf);
+	parent->SetDlgItemTextU8(editCtl, buf);
 	return	TRUE;
 }
 
-BOOL OpenFileDlg::Exec(char *target, char *title, char *filter, char *defaultDir)
+BOOL OpenFileDlg::Exec(char *target, int targ_size, char *title, char *filter, char *defaultDir,
+						char *defaultExt)
 {
-	OPENFILENAME	ofn;
-	char			szDirName[MAX_BUF] = "", szFile[MAX_BUF] = "", *fname = NULL;
+	if (targ_size <= 1) return FALSE;
 
-	if (*target && ::GetFullPathName(target, MAX_BUF, szDirName, &fname) != 0 && fname)
-		*(fname -1) = 0, strncpyz(szFile, fname, MAX_PATH);
-	else if (defaultDir)
-		strncpyz(szDirName, defaultDir, MAX_PATH);
+	OPENFILENAME	ofn;
+	U8str			fileName(targ_size);
+	U8str			dirName(targ_size);
+	char			*fname = NULL;
+
+	if (*target && GetFullPathNameU8(target, targ_size, dirName.Buf(), &fname) != 0 && fname) {
+		*(fname -1) = 0;
+		strncpyz(fileName.Buf(), fname, targ_size);
+	}
+	else if (defaultDir) {
+		strncpyz(dirName.Buf(), defaultDir, targ_size);
+	}
 
 	memset(&ofn, 0, sizeof(ofn));
 	ofn.lStructSize = sizeof(OPENFILENAME);
 	ofn.hwndOwner = parent ? parent->hWnd : NULL;
 	ofn.lpstrFilter = filter;
 	ofn.nFilterIndex = filter ? 1 : 0;
-	ofn.lpstrFile = szFile;
-	ofn.nMaxFile = sizeof(szFile);
+	ofn.lpstrFile = fileName.Buf();
+	ofn.lpstrDefExt	 = defaultExt;
+	ofn.nMaxFile = targ_size;
 	ofn.lpstrTitle = title;
-	ofn.lpstrInitialDir = szDirName;
+	ofn.lpstrInitialDir = dirName.Buf();
 	ofn.lpfnHook = hook;
 	ofn.Flags = OFN_HIDEREADONLY|OFN_EXPLORER|(hook ? OFN_ENABLEHOOK : 0);
 	if (mode == OPEN || mode == MULTI_OPEN)
 		ofn.Flags |= OFN_FILEMUSTEXIST | (mode == MULTI_OPEN ? OFN_ALLOWMULTISELECT : 0);
 	else
 		ofn.Flags |= (mode == NODEREF_SAVE ? OFN_NODEREFERENCELINKS : 0);
+	ofn.Flags |= flags;
 
-	char	dirNameBak[MAX_PATH];
-	::GetCurrentDirectory(sizeof(dirNameBak), dirNameBak);
+	U8str	dirNameBak(targ_size);
+	GetCurrentDirectoryU8(targ_size, dirNameBak.Buf());
 
-	BOOL	ret = (mode == OPEN || mode == MULTI_OPEN) ? ::GetOpenFileName(&ofn) : ::GetSaveFileName(&ofn);
+	BOOL	ret = (mode == OPEN || mode == MULTI_OPEN) ?
+					GetOpenFileNameU8(&ofn) : GetSaveFileNameU8(&ofn);
 
-	::SetCurrentDirectory(dirNameBak);
-	if (ret)
-	{
-		if (mode == MULTI_OPEN)
-			memcpy(target, szFile, sizeof(szFile));
-		else
-			strncpyz(target, ofn.lpstrFile, MAX_PATH);
+	SetCurrentDirectoryU8(dirNameBak.Buf());
+	if (ret) {
+		if (mode == MULTI_OPEN) {
+			memcpy(target, fileName.Buf(), targ_size);
+		} else {
+			strncpyz(target, ofn.lpstrFile, targ_size);
+		}
 
-		if (defaultDir)
-			strncpyz(defaultDir, ofn.lpstrFile, ofn.nFileOffset);
+		if (defaultDir) strncpyz(defaultDir, ofn.lpstrFile, ofn.nFileOffset);
 	}
 
 	return	ret;
 }
 
 /*
-	BrowseDirDlg—pƒR[ƒ‹ƒoƒbƒN
+	BrowseDirDlgç”¨ã‚³ãƒ¼ãƒ«ãƒãƒƒã‚¯
 */
 int CALLBACK BrowseDirDlgProc(HWND hWnd, UINT uMsg, LPARAM lParam, LPARAM path)
 {
 	switch (uMsg)
 	{
 	case BFFM_INITIALIZED:
-		SendMessage(hWnd, BFFM_SETSELECTION, (WPARAM)TRUE, path);
+		SendMessageW(hWnd, BFFM_SETSELECTIONW, (WPARAM)TRUE, path);
 		break;
 
 	case BFFM_SELCHANGED:
@@ -1365,359 +932,38 @@ int CALLBACK BrowseDirDlgProc(HWND hWnd, UINT uMsg, LPARAM lParam, LPARAM path)
 }
 
 /*
-	ƒfƒBƒŒƒNƒgƒŠƒ_ƒCƒAƒƒO—p”Ä—pƒ‹[ƒ`ƒ“
+	ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒªãƒ€ã‚¤ã‚¢ãƒ­ã‚°ç”¨æ±ç”¨ãƒ«ãƒ¼ãƒãƒ³
 */
 BOOL BrowseDirDlg(TWin *parentWin, const char *title, const char *defaultDir, char *buf)
 { 
 	IMalloc			*iMalloc = NULL;
-	BROWSEINFO		brInfo;
+	BROWSEINFOW		brInfo;
 	LPITEMIDLIST	pidlBrowse;
 	BOOL			ret = FALSE;
+	Wstr			buf_w(MAX_PATH), defaultDir_w(MAX_PATH), title_w(title);
 
-	if (!SUCCEEDED(SHGetMalloc(&iMalloc)))
-		return FALSE;
+	if (!SUCCEEDED(SHGetMalloc(&iMalloc))) return FALSE;
 
+	U8toW(defaultDir, defaultDir_w.Buf(), MAX_PATH);
 	brInfo.hwndOwner = parentWin->hWnd;
 	brInfo.pidlRoot = 0;
-	brInfo.pszDisplayName = buf;
-	brInfo.lpszTitle = title;
+	brInfo.pszDisplayName = buf_w.Buf();
+	brInfo.lpszTitle = title_w;
 	brInfo.ulFlags = BIF_RETURNONLYFSDIRS;
 	brInfo.lpfn = BrowseDirDlgProc;
-	brInfo.lParam = (LPARAM)defaultDir;
+	brInfo.lParam = (LPARAM)defaultDir_w.Buf();
 	brInfo.iImage = 0;
 
-	if ((pidlBrowse = SHBrowseForFolder(&brInfo)) != NULL)
+	if ((pidlBrowse = SHBrowseForFolderV((BROWSEINFO *)&brInfo)))
 	{
-		ret = SHGetPathFromIDList(pidlBrowse, buf);
+		ret = SHGetPathFromIDListV(pidlBrowse, buf_w.Buf());
 		iMalloc->Free(pidlBrowse);
+		if (ret) {
+			WtoU8(buf_w, buf, MAX_PATH_U8);
+		}
 	}
 
 	iMalloc->Release();
 	return	ret;
 }
 
-BOOL GetLastErrorMsg(char *msg, TWin *win)
-{
-	char	buf[MAX_BUF];
-	wsprintf(buf, "%s error = %x", msg ? msg : "", GetLastError());
-	return	MessageBox(win ? win->hWnd : NULL, buf, MSG_STR, MB_OK);
-}
-
-BOOL GetSockErrorMsg(char *msg, TWin *win)
-{
-	char	buf[MAX_BUF];
-	wsprintf(buf, "%s error = %d", msg ? msg : "", WSAGetLastError());
-	return	MessageBox(win ? win->hWnd : NULL, buf, MSG_STR, MB_OK);
-}
-
-
-/*
-	ƒpƒX‚©‚çƒtƒ@ƒCƒ‹–¼•”•ª‚¾‚¯‚ğæ‚èo‚·
-*/
-BOOL PathToFname(const char *org_path, char *target_fname)
-{
-	char	path[MAX_BUF], *fname=NULL;
-
-	if (::GetFullPathName(org_path, sizeof(path), path, &fname) == 0 || fname == NULL)
-		return	FALSE;
-
-	strncpyz(target_fname, fname, MAX_PATH);
-	return	TRUE;
-}
-
-/*
-	ƒpƒX‚©‚çƒtƒ@ƒCƒ‹–¼•”•ª‚¾‚¯‚ğæ‚èo‚·i‹­§“I‚É–¼‘O‚ğì‚éj
-*/
-void ForcePathToFname(const char *org_path, char *target_fname)
-{
-	if (PathToFname(org_path, target_fname))
-		return;
-
-	if (org_path[1] == ':')
-		wsprintf(target_fname, "(%c-drive)", *org_path);
-	else if (org_path[0] == '\\' && org_path[1] == '\\') {
-		if (PathToFname(org_path + 2, target_fname) == FALSE)
-			wsprintf(target_fname, "(root)");
-	}
-	else wsprintf(target_fname, "(unknown)");
-}
-
-/*
-	2byte•¶šŒn‚Å‚à‚«‚¿‚ñ‚Æ“®ì‚³‚¹‚é‚½‚ß‚Ìƒ‹[ƒ`ƒ“
-	 (*strrchr(path, "\\")=0 ‚¾‚Æ '•\'‚È‚Ç‚Å–â‘è‚ğ‹N‚·‚½‚ß)
-*/
-BOOL PathToDir(const char *org_path, char *target_dir)
-{
-	char	path[MAX_BUF], *fname=NULL;
-
-	if (::GetFullPathName(org_path, sizeof(path), path, &fname) == 0 || fname == NULL)
-		return	strncpyz(target_dir, org_path, MAX_PATH), FALSE;
-
-	if (fname - path > 3 || path[1] != ':')
-		*(fname - 1) = 0;
-	else
-		*fname = 0;		// C:\ ‚Ìê‡
-
-	strncpyz(target_dir, path, MAX_PATH);
-	return	TRUE;
-}
-
-/*
-	fname ‚Éƒtƒ@ƒCƒ‹–¼ˆÈŠO‚Ì—v‘f‚ªŠÜ‚Ü‚ê‚Ä‚¢‚È‚¢‚±‚Æ‚ğŠm‚©‚ß‚é
-*/
-BOOL IsSafePath(const char *fullpath, const char *fname)
-{
-	char	fname2[MAX_PATH];
-
-	if (PathToFname(fullpath, fname2) == FALSE)
-		return	FALSE;
-
-	return	strcmp(fname, fname2) == 0 ? TRUE : FALSE;
-}
-
-int MakePath(char *dest, const char *dir, const char *file)
-{
-	BOOL	separetor = TRUE;
-	int		len;
-
-	if ((len = strlen(dir)) == 0)
-		return	wsprintf(dest, "%s", file);
-
-	if (dir[len -1] == '\\')	// •\‚È‚ÇA2byte–Ú‚ª'\\'‚ÅI‚é•¶š—ñ‘Îô
-	{
-		if (len >= 2 && IsDBCSLeadByte(dir[len -2]) == FALSE)
-			separetor = FALSE;
-		else {
-			for (u_char *p=(u_char *)dir; *p && p[1]; IsDBCSLeadByte(*p) ? p+=2 : p++)
-				;
-			if (*p == '\\')
-				separetor = FALSE;
-		}
-	}
-	return	wsprintf(dest, "%s%s%s", dir, separetor ? "\\" : "", file);
-}
-
-/*
-	time() ‚Ì‘ã‚í‚è
-	...‚È‚º‚©”ŠÔ‚ÌŒë·‚Í‚ ‚é‚ç‚µ‚¢
-	i‘Š‘ÎŠÔ‚Æ‚µ‚Ä‚µ‚©Ag—p‚µ‚È‚¢j
-*/
-time_t Time(void)
-{
-	SYSTEMTIME	st;
-	_int64		ft;
-// 1601”N1Œ1“ú‚©‚ç1970”N1Œ1“ú‚Ü‚Å‚Ì’ÊZ100ƒiƒm•b
-#define UNIXTIME_BASE	((_int64)0x019db1ded53e8000)
-
-	::GetLocalTime(&st);
-	::SystemTimeToFileTime(&st, (FILETIME *)&ft);
-	return	(time_t)((ft - UNIXTIME_BASE) / 10000000);
-}
-
-/*
-	ctime() ‚Ì‘ã‚í‚è
-	‚½‚¾‚µA‰üs‚È‚µ
-*/
-char *Ctime(SYSTEMTIME *st)
-{
-	static char	buf[] = "Mon Jan 01 00:00:00 2999";
-	static char *wday = "SunMonTueWedThuFriSat";
-	static char *mon  = "JanFebMarAprMayJunJulAugSepOctNovDec";
-	SYSTEMTIME	_st;
-
-	if (st == NULL)
-	{
-		st = &_st;
-		::GetLocalTime(st);
-	}
-	wsprintf(buf, "%.3s %.3s %02d %02d:%02d:%02d %04d", &wday[st->wDayOfWeek * 3], &mon[(st->wMonth - 1) * 3], st->wDay, st->wHour, st->wMinute, st->wSecond, st->wYear);
-	return	buf;
-}
-
-/*
-	16i•¶š—ñ <-> ƒoƒCƒiƒŠ•ÏŠ·ƒ‹[ƒ`ƒ“
-*/
-inline u_char hexchar2char(u_char ch)
-{
-	if (ch >= '0' && ch <= '9')
-		return ch - '0';
-	ch = toupper(ch);
-	if (ch >= 'A' && ch <= 'Z')
-		return ch - 'A' + 10;
-	return 0;
-}
-
-BOOL hexstr2bin(const char *buf, BYTE *bindata, int maxlen, int *len)
-{
-	for (*len=0; buf[0] && buf[1] && *len < maxlen; buf+=2, (*len)++)
-	{
-		bindata[*len] = hexchar2char(buf[0]) << 4 | hexchar2char(buf[1]);
-	}
-	return	TRUE;
-}
-
-/* hexstr to little-endian binary */
-BOOL hexstr2bin_bigendian(const char *buf, BYTE *bindata, int maxlen, int *len)
-{
-	*len = 0;
-	for (int buflen = strlen(buf); buflen >= 2 && *len < maxlen; buflen-=2, (*len)++)
-	{
-		bindata[*len] = hexchar2char(buf[buflen-1]) | hexchar2char(buf[buflen-2]) << 4;
-	}
-	return	TRUE;
-}
-
-static char *hexstr = "0123456789abcdef";
-void bin2hexstr(const BYTE *bindata, int len, char *buf)
-{
-	for (int cnt=0; cnt < len; cnt++)
-	{
-		*buf++ = hexstr[bindata[cnt] >> 4];
-		*buf++ = hexstr[bindata[cnt] & 0x0f];
-	}
-	*buf = 0;
-}
-
-/* little-endian binary to hexstr */
-void bin2hexstr_bigendian(const BYTE *bindata, int len, char *buf)
-{
-	while (len-- > 0)
-	{
-		*buf++ = hexstr[bindata[len] >> 4];
-		*buf++ = hexstr[bindata[len] & 0x0f];
-	}
-	*buf = 0;
-}
-
-/*
-	16i -> long long
-*/
-_int64 hex2ll(char *buf)
-{
-	_int64	ret = 0;
-
-	for ( ; *buf; buf++)
-	{
-		if (*buf >= '0' && *buf <= '9')
-			ret = (ret << 4) | (*buf - '0');
-		else if (toupper(*buf) >= 'A' && toupper(*buf) <= 'F')
-			ret = (ret << 4) | (toupper(*buf) - 'A' + 10);
-		else continue;
-	}
-	return	ret;
-}
-
-/*
-	ƒTƒCƒY‚ğ•¶š—ñ‚É
-*/
-int MakeSizeString(char *buf, _int64 size, int flg)
-{
-	if (size >= 1024 * 1024)
-	{
-		if (flg & MSS_NOPOINT)
-			return	wsprintf(buf, "%d%sMB", (int)(size / 1024 / 1024), flg & MSS_SPACE ? " " : "");
-		else
-			return	wsprintf(buf, "%d.%d%sMB", (int)(size / 1024 / 1024), (int)((size * 10 / 1024 / 1024) % 10), flg & MSS_SPACE ? " " : "");
-	}
-	else return	wsprintf(buf, "%d%sKB", (int)(ALIGN_BLOCK(size, 1024)), flg & MSS_SPACE ? " " : "");
-}
-
-/*
-	strtok_r() ‚ÌŠÈˆÕ”Å
-*/
-char *separate_token(char *buf, char separetor, char **handle)
-{
-	char	*_handle;
-
-	if (handle == NULL)
-		handle = &_handle;
-
-	if (buf)
-		*handle = buf;
-
-	if (*handle == NULL || **handle == 0)
-		return	NULL;
-
-	while (**handle == separetor)
-		(*handle)++;
-	buf = *handle;
-
-	if (**handle == 0)
-		return	NULL;
-
-	while (**handle && **handle != separetor)
-		(*handle)++;
-
-	if (**handle == separetor)
-		*(*handle)++ = 0;
-
-	return	buf;
-}
-
-void MakeHash(const BYTE *data, int len, char *hashStr)
-{
-	CBlowFish	bl((BYTE *)"ipmsg", 5);
-	BYTE		*buf = new BYTE [len + 8];
-
-	bl.Encrypt(data, buf, len);
-	bin2hexstr(buf + len - 8, 8, hashStr);
-	delete [] buf;
-}
-
-BOOL VerifyHash(const BYTE *data, int len, const char *orgHash)
-{
-	char	hash[MAX_NAMEBUF];
-
-	MakeHash(data, len, hash);
-	return	stricmp(hash, orgHash);
-}
-
-ULONG ResolveAddr(const char *_host)
-{
-	if (_host == NULL)
-		return 0;
-
-	ULONG	addr = ::inet_addr(_host);
-
-	if (addr == 0xffffffff)
-	{
-		hostent	*ent = ::gethostbyname(_host);
-		addr = ent ? *(ULONG *)ent->h_addr_list[0] : 0;
-	}
-
-	return	addr;
-}
-
-void TBroadcastList::Reset()
-{
-	TBroadcastObj	*obj;
-
-	while ((obj = Top()) != NULL)
-	{
-		DelObj(obj);
-		delete obj;
-	}
-}
-
-#if 0
-BOOL TBroadcastList::SetHost(const char *host)
-{
-	ULONG	addr = ResolveAddr(host);
-
-	if (addr == 0 || IsExistHost(host))
-		return	FALSE;
-
-	SetHostRaw(host, addr);
-	return	TRUE;
-}
-
-BOOL TBroadcastList::IsExistHost(const char *host)
-{
-	for (TBroadcastObj *obj=Top(); obj; obj=Next(obj))
-		if (stricmp(obj->Host(), host) == 0)
-			return	TRUE;
-
-	return	FALSE;
-}
-
-#endif

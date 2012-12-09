@@ -1,13 +1,12 @@
 Original ipmsg protocol specification is written in Japanese.
 This document was translated by Mr.Kanazawa.
-This document is not verified yet.
+This document is not verified yet. (too old...)
 
 ----------------------------------------------------------------------
         IP Messenger communication protocol (Draft-9)    1996/02/21
                                                 Modified 2003/01/14
 
                                                        H.Shirouzu
-                                               shirouzu@h.email.ne.jp
 ----------------------------------------------------------------------
 
 About IP Messenger
@@ -208,7 +207,7 @@ Function description
 	However, Send Message uses an IPMSG_ANSREADMSG command,  
 	not IPMSG_RECVMSG.
 
-     3) Message Send/Receive Å|encrypted extension (Added in the version-9)
+     3) Message Send/Receive encrypted extension (Added in the version-9)
 
 	Use the combination of Public-key(RSA) and common key(RC2/Blowfish).
 	(Encrypted extension area is used in hex format.)
@@ -222,7 +221,7 @@ Function description
 	part of extension  
 
 	In addition, In IPMSG_ANSPUBKEY, public key written as EE-NNNNNN
-	E=ExponentÅAN=method)devide by ':'. and Input the Fdelimiter '-' 
+	E=Exponent, N=method)devide by ':'. and Input the Fdelimiter '-' 
 	between E and N.
 
 	This sequence can be skipped after the 2nd Send/Receive process by 
@@ -330,12 +329,12 @@ Function description
 
      3) Kanji codes
 
-	SJIS
+	CP932
 
 
-  5. Contact e-mail address
-
-	E-Mail shirouzu@h.email.ne.jp
+  5. Contact
+	http://ipmsg.org/ (Japanese site)
+	http://ipmsg.org/index.html.en (English site)
 
 
 Note

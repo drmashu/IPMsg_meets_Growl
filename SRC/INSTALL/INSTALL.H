@@ -1,61 +1,30 @@
-/* @(#)Copyright (C) H.Shirouzu 1998-2002   install.h	Ver2.00 */
+Ôªø/* @(#)Copyright (C) H.Shirouzu 1998-2011   install.h	Ver3.20 */
 /* ========================================================================
 	Project  Name			: Installer for IPMSG32
 	Module Name				: Main Header
 	Create					: 1998-06-14(Sun)
-	Update					: 2002-11-03(Sun)
+	Update					: 2011-05-23(Mon)
 	Copyright				: H.Shirouzu
 	Reference				: 
 	======================================================================== */
 
-enum InstMode { SETUP_MODE, RESETUP_MODE, UNINSTALL_MODE };
-
-struct InstallCfg {
-	InstMode	mode;
-	int			portNo;
-	BOOL		startupLink;
-	BOOL		programLink;
-	BOOL		desktopLink;
-	BOOL		delPubkey;
-};
-
-class TInstSheet : public TDlg
-{
-	InstallCfg	*cfg;
-
-public:
-	TInstSheet(TWin *_parent, InstallCfg *_cfg);
-
-	virtual BOOL	EvCreate(LPARAM lParam);
-	virtual BOOL	EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl);
-
-	void	Paste(void);
-	void	GetData(void);
-	void	PutData(void);
-};
-
 class TInstDlg : public TDlg
 {
 protected:
-	TSubClassCtl	staticText;
-	TInstSheet		*propertySheet;
-	InstallCfg		cfg;
+	BOOL	runasImm;
+	HWND	runasWnd;
 
 public:
 	TInstDlg(char *cmdLine);
 	virtual ~TInstDlg();
 
 	virtual BOOL	EvCreate(LPARAM lParam);
-	virtual BOOL	EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl);
-#if 0
 	virtual BOOL	EvNcDestroy(void);
-	virtual BOOL	EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam);
-#endif
+	virtual BOOL	EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl);
+	virtual BOOL	EventApp(UINT uMsg, WPARAM wParam, LPARAM lParam);
 	BOOL	Install(void);
-	BOOL	UnInstall(void);
-	void	ChangeMode(void);
-	BOOL	TerminateIPMsg(void);
-	BOOL	RemoveSameLink(const char *dir, char *remove_path=NULL);
+	BOOL	AppKick(void);
+	int		TerminateIPMsg(void);
 };
 
 class TInstApp : public TApp
@@ -75,7 +44,7 @@ protected:
 
 public:
 	TBrowseDirDlg(char *_fileBuf) { fileBuf = _fileBuf; }
-	virtual BOOL	CreateByWnd(HWND _hWnd);
+	virtual BOOL	AttachWnd(HWND _hWnd);
 	virtual BOOL	EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl);
 	virtual BOOL	SetFileBuf(LPARAM list);
 	BOOL	IsDirty(void) { return dirtyFlg; };
@@ -91,28 +60,37 @@ public:
 	virtual BOOL	EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl);
 };
 
+class TLaunchDlg : public TDlg
+{
+protected:
+	char *msg;
+
+public:
+	TLaunchDlg(LPCSTR _msg, TWin *_win);
+	virtual ~TLaunchDlg();
+
+	virtual BOOL	EvCreate(LPARAM lParam);
+	virtual BOOL	EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl);
+};
+
+
+#define WM_IPMSG_HIDE			(WM_APP + 100)
+#define WM_IPMSG_QUIT			(WM_APP + 101)
+#define WM_IPMSG_INSTALL		(WM_APP + 102)
+
 #define IPMSG_CLASS				"ipmsg_class"
 #define IPMSG_NAME				"IPMSG for Win32"
 #define IPMSG_FULLNAME			"IP Messenger for Win"
 #define IPMSG_STR				"IPMsg"
 #define HSTOOLS_STR				"HSTools"
-#ifdef ENGLISH
-#define REGSTR_IPMSG			IPMSG_STR "Eng"
-#else
-#define REGSTR_IPMSG			IPMSG_STR
-#endif
 #define IPMSG_DEFAULT_PORT		0x0979
 
 #define IPMSG_EXENAME			"ipmsg.exe"
-#define INSTALL_EXENAME			"setup.exe"
-#define README_NAME				"readme.txt"
-#define OPENLAB_NAME			"openlab.txt"
+#define SETUP_EXENAME			"setup.exe"
+#define IPMSGHELP_NAME			"ipmsg.chm"
 
-#define UNINSTALL_CMDLINE		"/r"
 #define IPMSG_SHORTCUT_NAME		IPMSG_NAME ".lnk"
 #define UNC_PREFIX				"\\\\"
-#define MAX_WRAPPER_IPMSGSIZE	50000
-#define RESOLVE_WRAPPER_IPMSG	"org\\ipmsg.exe"
 #define MAX_BUF					1024
 
 #define REGSTR_SHELLFOLDERS		REGSTR_PATH_EXPLORER "\\Shell Folders"
@@ -121,47 +99,19 @@ public:
 #define REGSTR_PROGRAMS			"Programs"
 #define REGSTR_PATH				"Path"
 #define REGSTR_PROGRAMFILES		"ProgramFilesDir"
+#define REGSTR_PROGRAMFILESX86	"ProgramFilesDir (x86)"
 
-#ifdef	ENGLISH
-#define MKDIR_STR				"CREATE"
-#define RMDIR_STR				"DELETE"
-#else
-#define MKDIR_STR				"çÏê¨"
-#define RMDIR_STR				"çÌèú"
-#endif
 #define INSTALL_STR				"Install"
-#define UNINSTALL_STR			"UnInstall"
-
-#ifdef	ENGLISH
-#define NOTNEWSHELL_MSGSTR		"This setup is only run new shell.\r\n"
-#define SETUPCOMPLETE_MSGSTR	"Setup is completed.\r\n\r\nDo you want to start IPMSG?"
-#define UNINSTCOMPLETE_MSGSTR	"Uninstallation is completed.\r\n"
-#define TERMINATE_MSGSTR		"Do you permit to close IPMSG?"
-#define NOTCREATEDIR_MSGSTR		"Can't create directory"
-#define NOTCREATEFILE_MSGSTR	"Can't create file"
-#define START_MSGSTR			"Do you permit to start?"
-#else
-#define NOTNEWSHELL_MSGSTR		"Ç±ÇÃÉZÉbÉgÉAÉbÉvÇÕÅANewShellêÍópÇ≈Ç∑ÅB\r\nNT3.51Ç≈ÇÃÉCÉìÉXÉgÅ[ÉãÇÕéËìÆÇ≈çsÇ¡ÇƒÇ≠ÇæÇ≥Ç¢ÅB"
-#define SETUPCOMPLETE_MSGSTR	"ÉZÉbÉgÉAÉbÉvÇÕäÆóπÇµÇ‹ÇµÇΩÅB\r\nÉAÉìÉCÉìÉXÉgÅ[ÉãÇÕÅuÉAÉvÉäÉPÅ[ÉVÉáÉìÇÃí«â¡Ç∆çÌèúÅvÇ©ÇÁçsÇ¡ÇƒÇ≠ÇæÇ≥Ç¢ÅB\r\n\r\nÇ±ÇÃÇ‹Ç‹ÅAIP Messenger ÇãNìÆÇµÇ‹Ç∑Ç©ÅH"
-#define UNINSTCOMPLETE_MSGSTR	"ÉAÉìÉCÉìÉXÉgÅ[ÉãÇÕäÆóπÇµÇ‹ÇµÇΩÅB\r\nÉtÉ@ÉCÉãçÌèúé©ëÃÇÕéËìÆÇ≈çsÇ¡ÇƒÇ≠ÇæÇ≥Ç¢ÅB"
-#define TERMINATE_MSGSTR		"Ç†ÇÁÇ©Ç∂ÇﬂÅAåªç›ãNìÆÇµÇƒÇ¢ÇÈ\r\nIP Messenger ÇèIóπÇ≥ÇπÇÈïKóvÇ™Ç†ÇËÇ‹Ç∑ÅB\r\nÇÊÇÎÇµÇ¢Ç≈Ç∑Ç©ÅH"
-#define NOTCREATEDIR_MSGSTR		"ÉfÉBÉåÉNÉgÉäÇ™çÏÇÍÇ‹ÇπÇÒ"
-#define NOTCREATEFILE_MSGSTR	"ÉtÉ@ÉCÉãÇÉRÉsÅ[Ç≈Ç´Ç‹ÇπÇÒ"
-#define START_MSGSTR			"äJénÇµÇ‹Ç∑"
-#endif
 
 // function prototype
-int strncmpi(const char *str1, const char *str2, int num);
 BOOL CALLBACK TerminateIPMsgProc(HWND hWnd, LPARAM lParam);
 BOOL SymLink(LPCSTR src, LPSTR dest, LPCSTR arg="");
-BOOL ReadLink(LPCSTR src, LPSTR dest, LPSTR arg);
 BOOL DeleteLink(LPCSTR path);
 void BrowseDirDlg(TWin *parentWin, UINT editCtl, char *title);
 int CALLBACK BrowseDirDlg_Proc(HWND hWnd, UINT uMsg, LPARAM lParam, LPARAM data);
-BOOL GetParentDir(const char *srcfile, char *dir);
+BOOL GetParentDirU8(const char *srcfile, char *dir);
 int MakePath(char *dest, const char *dir, const char *file);
-UINT GetDriveTypeEx(const char *file);
-
-// inline function
-inline BOOL IsUncFile(const char *path) { return strnicmp(path, UNC_PREFIX, 2) == 0; }
+enum CreateStatus { CS_OK, CS_BROKEN, CS_ACCESS };
+CreateStatus CreateFileBySelf(char *path, char *fname);
+BOOL RemoveSameLink(const char *dir, char *remove_path=NULL);
 

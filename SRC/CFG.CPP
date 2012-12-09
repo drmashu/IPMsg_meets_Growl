@@ -1,19 +1,17 @@
-static char *cfg_id = 
-	"@(#)Copyright (C) H.Shirouzu 1996-2004   cfg.cpp	Ver2.05";
+Ôªøstatic char *cfg_id = 
+	"@(#)Copyright (C) H.Shirouzu 1996-2012   cfg.cpp	Ver3.40";
 /* ========================================================================
 	Project  Name			: IP Messenger for Win32
 	Module Name				: Configuration
 	Create					: 1996-09-27(Sat)
-	Update					: 2004-01-01(Thu)
+	Update					: 2012-04-02(Mon)
 	Copyright				: H.Shirouzu
 	Reference				: 
 	======================================================================== */
 
 #include <stdio.h>
-#include "tlib.h"
 #include "resource.h"
 #include "ipmsg.h"
-#include "msgstr.h"
 #include "blowfish.h"
 
 #define IPMSG_DEFAULT_LISTGETMSEC	3000
@@ -25,13 +23,20 @@ static char *cfg_id =
 #define IPMSG_DEFAULT_FINDMAX		12
 #define IPMSG_DEFAULT_DELAY			500
 #define IPMSG_DEFAULT_UPDATETIME	10
-#define IPMSG_DEFAULT_KEEPHOSTTIME	(3600 * 24 * 180)	// 180ì˙ä‘
+#define IPMSG_DEFAULT_KEEPHOSTTIME	(3600 * 24 * 180)	// 180Êó•Èñì
 #define IPMSG_DEFAULT_QUOTE			">"
-#define IPMSG_DEFAULT_ENCRYPTNUM	20
+#define IPMSG_DEFAULT_ENCRYPTNUM	50
+#define IPMSG_DEFAULT_CLIPMODE		(CLIP_ENABLE|CLIP_SAVE)
+#define IPMSG_DEFAULT_CLIPMAX		10
+#define IPMSG_DEFAULT_LRUUSERMAX	10
+#define IPMSG_DEFAULT_OPENMSGTIME	3000
+#define IPMSG_DEFAULT_RECVMSGTIME	10000
+#define IPMSG_DEFAULT_MARKER_THICK	4
 
-#define IPMSG_DEFAULT_VIEWMAX		(8 * 1024 * 1024)	// 8MB
-#define IPMSG_DEFAULT_TRANSMAX		(64 * 1024)			// 64KB
+#define IPMSG_DEFAULT_VIEWMAX		(1 * 1024 * 1024)	// 1MB
+#define IPMSG_DEFAULT_TRANSMAX		(128 * 1024)		// 128KB
 #define IPMSG_DEFAULT_TCPBUFMAX		(256 * 1024)		// 256KB
+#define IPMSG_DEFAULT_IOBUFMAX		(1024 * 1024)		// 1MB
 
 #define IPMSG_DEFAULT_NICKNAMEWIDTH	97
 #define IPMSG_DEFAULT_ABSENCEWIDTH	16
@@ -41,6 +46,12 @@ static char *cfg_id =
 #define IPMSG_DEFAULT_USERWIDTH		90
 #define IPMSG_DEFAULT_PRIORITYWIDTH	21
 
+#define IPMSG_DEFAULT_HWUSER_WIDTH	100
+#define IPMSG_DEFAULT_HWODATE_WIDTH	 90
+#define IPMSG_DEFAULT_HWSDATE_WIDTH	 10
+#define IPMSG_DEFAULT_HWID_WIDTH	 10
+
+#define LCID_KEY			"lcid"
 #define NOBEEP_STR			"NoBeep"
 #define LISTGET_STR			"ListGet"
 #define LISTGETMSEC_STR		"ListGetMSec"
@@ -67,15 +78,17 @@ static char *cfg_id =
 #define DELAYTIME_STR		"DelayTime"
 #define QUOTECHECK_STR		"QuoteCheck"
 #define SECRETCHECK_STR		"SecretCheck"
-#define IPADDRCHECK_STR		"IPAddrCheck"
-#define ONECLICKPOPUP_STR	"OneClickPopup"
+#define IPADDRCHECK_STR		"IPAddrCheck2"
+#define RECVIPADDRCHECK_STR	"RecvIPAddrCheck"
+#define ONECLICKPOPUP_STR	"OneClickPopup2"
+#define BALLOONNOTIFY_STR	"BalloonNotify"
 #define ABNORMALBTN_STR		"AbnormalButton"
 #define DIALUPCHECK_STR		"DialUpCheck"
-#define NICKNAMECHECK_STR	"NickNameCheck"
+#define LOGONLOG_STR		"LogonLog"
+#define RECVLOGONDISP_STR	"RecvLogonDisp"
 #define NICKNAMESTR_STR		"NickNameStr"
 #define GROUPNAMESTR_STR	"GroupNameStr"
 #define ABSENCENONPOPUP_STR	"AbsenceNonPopup"
-#define LANG_STR			"Lang"
 #define SORT_STR			"Sort"
 #define UPDATETIME_STR		"UpdateTime"
 #define KEEPHOSTTIME_STR	"KeepHostTime"
@@ -83,8 +96,9 @@ static char *cfg_id =
 #define DEFAULTURL_STR		"DefaultUrl"
 #define SHELLEXEC_STR		"ShellExec"
 #define EXTENDENTRY_STR		"ExtendEntry"
+#define EXTENDBROADCAST_STR	"ExtendBroadcast"
 #define QUOTESTR_STR		"QuoteStr"
-#define CONTROLIME_STR		"ControlIME"
+#define CONTROLIME_STR		"ControlIME2"
 #define HOTKEY_STR			"HotKey"
 #define HOTKEYCHECK_STR		"HotKeyCheck"
 #define HOTKEYMODIFY_STR	"HotKeyModify"
@@ -94,19 +108,36 @@ static char *cfg_id =
 #define ALLOWSENDLIST_STR	"AllowSendList"
 #define FILETRANSOPT_STR	"FileTransOpt"
 #define RESOLVEOPT_STR		"ResolveOpt"
-#define ENCRYPTNUM_STR		"EncryptNum"
+#define ENCRYPTNUM_STR		"EncryptNum2"
+#define CLIPMODE_STR		"ClipMode"
+#define CLIPMAX_STR			"ClipMax"
+#define CAPTUREDELAY_STR	"CaptureDelay"
+#define CAPTUREDELAYEX_STR	"CaptureDelayEx"
+#define CAPTUREMINIMIZE_STR	"CaptureMinimize"
+#define CAPTURECLIP_STR		"CaptureClip"
+#define CAPTURESAVE_STR		"CaptureSave"
+#define OPENMSGTIME_STR		"OpenMsgTime"
+#define RECVMSGTIME_STR		"RecvMsgTime"
+#define BALLOONNOINFO_STR	"BalloonNoInfo"
+#define TASKBARUI_STR		"TaskbarUI"
+#define MARKERTHICK_STR		"MarkerThick"
 
-#define VIEWMAX_STR			"ViewMax"
+#define VIEWMAX_STR			"ViewMax2"
 #define TRANSMAX_STR		"TransMax"
 #define TCPBUFMAX_STR		"TcpbufMax"
+#define IOBUFMAX_STR		"IoBufMax"
+#define LUMPCHECK_STR		"LumpCheck"
 
 #define LOGCHECK_STR		"LogCheck"
+#define LOGUTF8_STR			"LogUTF8"
 #define LOGFILE_STR			"LogFile"
 #define SOUNDFILE_STR		"SoundFile"
 #define ICON_STR			"Icon"
 #define REVICON_STR			"RevIcon"
 #define LASTOPEN_STR		"lastOpen"
 #define LASTSAVE_STR		"lastSave"
+#define LRUUSERMAX_STR		"lruUserMax"
+#define LRUUSERKEY_STR		"lruUser"
 
 #define WINSIZE_STR			"WindowSize"
 
@@ -131,6 +162,14 @@ static char *cfg_id =
 #define RECVSAVEPOS_STR		"RecvSavePos"
 #define RECVXPOS_STR		"RecvXpos"
 #define RECVYPOS_STR		"RecvYpos"
+
+#define HISTXDIFF_STR		"HistXdiff"
+#define HISTYDIFF_STR		"HistYdiff"
+#define HISTUSER_STR		"HistUser"
+#define HISTODATE_STR		"HistODate"
+#define HISTID_STR			"HistId2"
+#define HISTSDATE_STR		"HistSDate2"
+
 
 #define FONT_STR			"Fonts"
 #define SENDEDITFONT_STR	"SendEdit"
@@ -160,22 +199,26 @@ static char *cfg_id =
 #define PORTNO_STR			"PortNo"
 #define NICKNAME_STR		"NickName"
 #define GROUPNAME_STR		"GroupName"
+#define ALTERNAME_STR		"AlterName"
 #define PRIORITY_STR		"Priority"
 #define PRIORITYMAX_STR		"PriorityMax"
 #define PRIORITYSOUND_STR	"PrioritySound"
 #define PRIORITYREJECT_STR	"PriorityReject"
-#define GLIDLINE_STR		"GlidLine"
+#define PUBLICKEY_STR		"PublicKey"
+
+#define GRIDLINE_STR		"GlidLine" // typo...
 #define COLUMNITEMS_STR		"ColumnItems"
 
 #define CRYPT_STR			"Crypt"
+#define CRYPT2_STR			"Crypt2"
 #define PRIVBLOB_STR		"PrivBlob"
 #define PRIVTYPE_STR		"PrivEncryptType"
 #define PRIVSEED_STR		"PrivEncryptSeed"
 #define PRIVSEEDLEN_STR		"PrivEncryptSeedLen"
 
 char	*DefaultUrlProtocol[] = { "HTTP", "HTTPS", "FTP", "FILE", "TELNET", NULL };
-char	*DefaultAbsence[IPMSG_DEFAULT_ABSENCEMAX] = { DEFABSENCE1_MSGSTR, DEFABSENCE2_MSGSTR, DEFABSENCE3_MSGSTR, DEFABSENCE4_MSGSTR, DEFABSENCE5_MSGSTR, DEFABSENCE6_MSGSTR, DEFABSENCE7_MSGSTR, DEFABSENCE8_MSGSTR };
-char	*DefaultAbsenceHead[IPMSG_DEFAULT_ABSENCEMAX] = { DEFABSENCEHEAD1_MSGSTR, DEFABSENCEHEAD2_MSGSTR, DEFABSENCEHEAD3_MSGSTR, DEFABSENCEHEAD4_MSGSTR, DEFABSENCEHEAD5_MSGSTR, DEFABSENCEHEAD6_MSGSTR, DEFABSENCEHEAD7_MSGSTR, DEFABSENCEHEAD8_MSGSTR };
+char	*DefaultAbsence[IPMSG_DEFAULT_ABSENCEMAX];
+char	*DefaultAbsenceHead[IPMSG_DEFAULT_ABSENCEMAX];
 
 Cfg::Cfg(ULONG _nicAddr, int _portNo)
 {
@@ -184,32 +227,57 @@ Cfg::Cfg(ULONG _nicAddr, int _portNo)
 	AbsenceHead = NULL;
 	AbsenceStr = NULL;
 	FindStr = NULL;
-	privBlob = NULL;
+
+	int	i;
+
+	int	abs_ids[]  = { IDS_DEFABSENCE1, IDS_DEFABSENCE2, IDS_DEFABSENCE3, IDS_DEFABSENCE4, IDS_DEFABSENCE5, IDS_DEFABSENCE6, IDS_DEFABSENCE7, IDS_DEFABSENCE8, 0 };
+	for (i=0; abs_ids[i] && i < sizeof(DefaultAbsence) / sizeof(char *); i++) {
+		DefaultAbsence[i] = GetLoadStrU8(abs_ids[i]);
+	}
+
+	int	absh_ids[] = { IDS_DEFABSENCEHEAD1, IDS_DEFABSENCEHEAD2, IDS_DEFABSENCEHEAD3, IDS_DEFABSENCEHEAD4, IDS_DEFABSENCEHEAD5, IDS_DEFABSENCEHEAD6, IDS_DEFABSENCEHEAD7, IDS_DEFABSENCEHEAD8, 0 };
+	for (i=0; absh_ids[i] && i < sizeof(DefaultAbsenceHead) / sizeof(char *); i++) {
+		DefaultAbsenceHead[i] = GetLoadStrU8(absh_ids[i]);
+	}
+
+	char	buf[MAX_PATH_U8], path[MAX_PATH_U8], *fname = NULL;
+	GetModuleFileNameU8(NULL, buf, MAX_PATH_U8);
+	GetFullPathNameU8(buf, MAX_PATH_U8, path, &fname);
+	fname[-1] = 0; // remove '\\'
+	execDir = strdup(path);
+
+	memset(pub, 0, sizeof(pub));
+	memset(priv, 0, sizeof(priv));
 }
 
 Cfg::~Cfg()
 {
-	delete [] privBlob;
+	for (int i=KEY_1024; i < MAX_KEY; i++) {
+		delete [] priv[i].blob;
+	}
 	delete [] FindStr;
 	delete [] AbsenceHead;
 	delete [] AbsenceStr;
+	free(execDir);
 }
 
 BOOL Cfg::ReadRegistry(void)
 {
-	char	buf[MAX_LISTBUF], val[MAX_LISTBUF];
+	char	buf[MAX_BUF], val[MAX_BUF];
+	int		i;
 
 	GetRegName(buf, nicAddr, portNo);
 	TRegistry	reg(HS_TOOLS, buf);
 
-	if (reg.GetInt(NOPOPUPCHECK_STR, &NoPopupCheck) != TRUE)
+	if (!reg.GetInt(NOPOPUPCHECK_STR, &NoPopupCheck))
 	{
 		GetRegName(buf, 0, portNo);
 		reg.ChangeApp(HS_TOOLS, buf);
-		if (reg.GetInt(NOPOPUPCHECK_STR, &NoPopupCheck) != TRUE)
-			reg.ChangeApp(HS_TOOLS, IPMSG_MSGSTR);
+		if (!reg.GetInt(NOPOPUPCHECK_STR, &NoPopupCheck))
+			reg.ChangeApp(HS_TOOLS, GetLoadStr(IDS_IPMSG));
 	}
 
+	lcid = -1;
 	NoBeep = FALSE;
 	ListGet = FALSE;
 	HotKeyCheck = FALSE;
@@ -223,50 +291,67 @@ BOOL Cfg::ReadRegistry(void)
 	RecvMax = IsWinNT() ? IPMSG_DEFAULT_RECVMAX_NT : IPMSG_DEFAULT_RECVMAX_95;
 	NoErase = FALSE;
 	Debug = FALSE;
-	NoPopupCheck = FALSE;
-	OpenCheck = TRUE;
+	NoPopupCheck = TRUE;
+	OpenCheck = 1;
 	AbsenceSave = FALSE;
 	AbsenceCheck = FALSE;
 	AbsenceMax = IPMSG_DEFAULT_ABSENCEMAX;
 	AbsenceChoice = 0;
 	FindMax = IPMSG_DEFAULT_FINDMAX;
-	FindAll = FALSE;
+	FindAll = TRUE;
 	DelayTime = IPMSG_DEFAULT_DELAY;
 	QuoteCheck = TRUE;
-	SecretCheck = FALSE;
-	IPAddrCheck = FALSE;
-	OneClickPopup = FALSE;
+	SecretCheck = TRUE;
+	LogonLog = TRUE;
+	RecvLogonDisp = FALSE;
+	IPAddrCheck = TRUE;
+	RecvIPAddr = TRUE;
+	OneClickPopup = TRUE;
+	BalloonNotify = TRUE;
 	AbnormalButton = FALSE;
 	DialUpCheck = FALSE;
-	NickNameCheck = IPMSG_NICKNAME;
 	*NickNameStr = 0;
 	*GroupNameStr = 0;
 	AbsenceNonPopup = TRUE;
 	Sort = IPMSG_NAMESORT;
 	UpdateTime = IPMSG_DEFAULT_UPDATETIME;
 	KeepHostTime = IPMSG_DEFAULT_KEEPHOSTTIME;
-	MsgMinimize = FALSE;
 	DefaultUrl = TRUE;
 	ShellExec = FALSE;
 	ExtendEntry = TRUE;
-	ControlIME = FALSE;
-	GlidLineCheck = FALSE;
+	ExtendBroadcast = 1;
+	ControlIME = 1;
+	GridLineCheck = TRUE;
 	PriorityMax = DEFAULT_PRIORITYMAX;
 	PriorityReject = 0;
 	AllowSendList = TRUE;
 	fileTransOpt = 0;
 	ResolveOpt = 0;
 	EncryptNum = IPMSG_DEFAULT_ENCRYPTNUM;
+	ClipMode = IPMSG_DEFAULT_CLIPMODE;
+	ClipMax = IPMSG_DEFAULT_CLIPMAX;
+	CaptureDelay   = 300;
+	CaptureDelayEx = 500;
+	CaptureMinimize = TRUE;
+	CaptureClip = TRUE;
+	CaptureSave = FALSE;
+	OpenMsgTime = IPMSG_DEFAULT_OPENMSGTIME;
+	RecvMsgTime = IPMSG_DEFAULT_RECVMSGTIME;
+	BalloonNoInfo = FALSE;
+	TaskbarUI = /*IsWin7() ? TRUE :*/ FALSE;
+	MarkerThick = IPMSG_DEFAULT_MARKER_THICK;
+
 	ViewMax = IPMSG_DEFAULT_VIEWMAX;
 	TransMax = IPMSG_DEFAULT_TRANSMAX;
 	TcpbufMax = IPMSG_DEFAULT_TCPBUFMAX;
-	privBlobLen = 0;
-	hPrivKey = 0;
-	hSmallPrivKey = 0;
+	IoBufMax = IPMSG_DEFAULT_IOBUFMAX;
+	LumpCheck = FALSE;
+	lruUserMax = IPMSG_DEFAULT_LRUUSERMAX;
+
 	// CryptProtectData is available only Win2K/XP
-	privEncryptType = IsWin2K() ? PRIV_BLOB_DPAPI : PRIV_BLOB_RAW;
-	privEncryptSeed = NULL;
-	privEncryptSeedLen = 0;
+	for (i=0; i < MAX_KEY; i++) {
+		priv[i].encryptType = IsWin2K() ? PRIV_BLOB_DPAPI : PRIV_BLOB_RAW;
+	}
 
 	strncpyz(QuoteStr, IPMSG_DEFAULT_QUOTE, sizeof(QuoteStr));
 
@@ -278,12 +363,13 @@ BOOL Cfg::ReadRegistry(void)
 	SendWidth[SW_USER] = IPMSG_DEFAULT_USERWIDTH;
 	SendWidth[SW_PRIORITY] = IPMSG_DEFAULT_PRIORITYWIDTH;
 
+	ColumnItems = 0;
 	SetItem(&ColumnItems, SW_NICKNAME, TRUE);
 	SetItem(&ColumnItems, SW_GROUP, TRUE);
 	SetItem(&ColumnItems, SW_HOST, TRUE);
 
-	for (int cnt=0; cnt < MAX_SENDWIDTH; cnt++)
-		SendOrder[cnt] = cnt;
+	for (i=0; i < MAX_SENDWIDTH; i++)
+		SendOrder[i] = i;
 
 	SendXdiff		= 0;
 	SendYdiff		= 0;
@@ -298,9 +384,16 @@ BOOL Cfg::ReadRegistry(void)
 	RecvXpos		= 0;
 	RecvYpos		= 0;
 
+	HistWidth[HW_USER]  = IPMSG_DEFAULT_HWUSER_WIDTH;
+	HistWidth[HW_ODATE] = IPMSG_DEFAULT_HWODATE_WIDTH;
+	HistWidth[HW_SDATE] = IPMSG_DEFAULT_HWSDATE_WIDTH;
+	HistWidth[HW_ID]    = IPMSG_DEFAULT_HWID_WIDTH;
+	HistXdiff		= 0;
+	HistYdiff		= 0;
+
 	LogCheck = FALSE;
+	LogUTF8 = TRUE;
 	PasswdLogCheck = FALSE;
-	strncpyz(LogFile, "ipmsg.log", sizeof(LogFile));
 	*SoundFile = 0;
 	*IconFile = 0;
 	*RevIconFile = 0;
@@ -310,6 +403,7 @@ BOOL Cfg::ReadRegistry(void)
 	memset(&RecvHeadFont, 0, sizeof(RecvHeadFont));
 	memset(&RecvEditFont, 0, sizeof(RecvEditFont));
 
+	reg.GetInt(LCID_KEY, &lcid);
 	reg.GetInt(NOBEEP_STR, &NoBeep);
 	reg.GetInt(LISTGET_STR, &ListGet);
 	reg.GetInt(LISTGETMSEC_STR, (int *)&ListGetMSec);
@@ -328,22 +422,40 @@ BOOL Cfg::ReadRegistry(void)
 	reg.GetInt(FILETRANSOPT_STR, &fileTransOpt);
 	reg.GetInt(RESOLVEOPT_STR, &ResolveOpt);
 	reg.GetInt(ENCRYPTNUM_STR, &EncryptNum);
+	reg.GetInt(CLIPMODE_STR, &ClipMode);
+	ClipMode |= CLIP_ENABLE;
+	reg.GetInt(CLIPMAX_STR, &ClipMax);
+	reg.GetInt(CAPTUREDELAY_STR, &CaptureDelay);
+	reg.GetInt(CAPTUREDELAYEX_STR, &CaptureDelayEx);
+	reg.GetInt(CAPTUREMINIMIZE_STR, &CaptureMinimize);
+	reg.GetInt(CAPTURECLIP_STR, &CaptureClip);
+	reg.GetInt(CAPTURESAVE_STR, &CaptureSave);
+	reg.GetInt(OPENMSGTIME_STR, &OpenMsgTime);
+	reg.GetInt(RECVMSGTIME_STR, &RecvMsgTime);
+	reg.GetInt(BALLOONNOINFO_STR, &BalloonNoInfo);
+	reg.GetInt(TASKBARUI_STR, &TaskbarUI);
+	reg.GetInt(MARKERTHICK_STR, &MarkerThick);
 
 // for File Transfer
 	reg.GetInt(VIEWMAX_STR, &ViewMax);
-	if (ViewMax < 1024 * 1024)	// 1MB à»â∫ÇÃ MapFileOfView ÇÕîFÇﬂÇ»Ç¢
+	if (ViewMax < 1024 * 1024)	// 1MB ‰ª•‰∏ã„ÅÆ MapFileOfView „ÅØË™ç„ÇÅ„Å™„ÅÑ
 		ViewMax = IPMSG_DEFAULT_VIEWMAX;
 	reg.GetInt(TRANSMAX_STR, &TransMax);
-	if (TransMax < 8 * 1024)	// 8KB à»â∫ÇÃ file transfer buf ÇÕîFÇﬂÇ»Ç¢
+	if (TransMax < 8 * 1024)	// 8KB ‰ª•‰∏ã„ÅÆ file transfer buf „ÅØË™ç„ÇÅ„Å™„ÅÑ
 		TransMax = IPMSG_DEFAULT_TRANSMAX;
 	reg.GetInt(TCPBUFMAX_STR, &TcpbufMax);
-	if (TcpbufMax < 8 * 1024)	// 8KB à»â∫ÇÃ sockbuf ÇÕîFÇﬂÇ»Ç¢
+	if (TcpbufMax < 8 * 1024)	// 8KB ‰ª•‰∏ã„ÅÆ sockbuf „ÅØË™ç„ÇÅ„Å™„ÅÑ
 		TcpbufMax = IPMSG_DEFAULT_TCPBUFMAX;
+	reg.GetInt(IOBUFMAX_STR, &IoBufMax);
+	if (IoBufMax < TransMax)	// transmax ‰ª•‰∏ã„ÅÆ IO/Buf „ÅØË™ç„ÇÅ„Å™„ÅÑ
+		IoBufMax = TransMax;
+
+	reg.GetInt(LUMPCHECK_STR, &LumpCheck);
 
 // for Absence Message
-	typedef char MaxBuf[MAX_PATH];
+	typedef char MaxBuf[MAX_PATH_U8];
 	AbsenceStr = new MaxBuf[AbsenceMax];
-	memset(AbsenceStr, 0, MAX_PATH * AbsenceMax);
+	memset(AbsenceStr, 0, MAX_PATH_U8 * AbsenceMax);
 	reg.GetStr(ABSENCESTR_STR, AbsenceStr[0], sizeof(AbsenceStr[0]));
 
 	typedef char MaxHead[MAX_NAMEBUF];
@@ -352,17 +464,17 @@ BOOL Cfg::ReadRegistry(void)
 
 	if (reg.CreateKey(ABSENCESTR_STR))
 	{
-		for (int cnt=0; cnt < AbsenceMax; cnt++)
+		for (i=0; i < AbsenceMax; i++)
 		{
-			char	key[MAX_PATH];
+			char	key[MAX_PATH_U8];
 
-			wsprintf(key, "%s%d", ABSENCESTR_STR, cnt);
-			if (reg.GetStr(key, AbsenceStr[cnt], sizeof(AbsenceStr[cnt])) != TRUE)
-				strncpyz(AbsenceStr[cnt], DefaultAbsence[cnt < IPMSG_DEFAULT_ABSENCEMAX ? cnt : 0], MAX_PATH);
+			wsprintf(key, "%s%d", ABSENCESTR_STR, i);
+			if (!reg.GetStr(key, AbsenceStr[i], sizeof(AbsenceStr[i])))
+				strncpyz(AbsenceStr[i], DefaultAbsence[i < IPMSG_DEFAULT_ABSENCEMAX ? i : 0], MAX_PATH_U8);
 
-			wsprintf(key, "%s%d", ABSENCEHEAD_STR, cnt);
-			if (reg.GetStr(key, AbsenceHead[cnt], sizeof(AbsenceHead[cnt])) != TRUE)
-				strcpy(AbsenceHead[cnt], DefaultAbsenceHead[cnt < IPMSG_DEFAULT_ABSENCEMAX ? cnt : 0]);
+			wsprintf(key, "%s%d", ABSENCEHEAD_STR, i);
+			if (!reg.GetStr(key, AbsenceHead[i], sizeof(AbsenceHead[i])))
+				strcpy(AbsenceHead[i], DefaultAbsenceHead[i < IPMSG_DEFAULT_ABSENCEMAX ? i : 0]);
 		}
 		reg.CloseKey();
 	}
@@ -374,12 +486,12 @@ BOOL Cfg::ReadRegistry(void)
 		reg.GetInt(FINDMAX_STR, &FindMax);
 		reg.GetInt(FINDALL_STR, &FindAll);
 		FindStr = new MaxFind[FindMax];
-		for (int cnt=0; cnt < FindMax; cnt++)
+		for (i=0; i < FindMax; i++)
 		{
-			char	key[MAX_PATH];
-			wsprintf(key, "%d", cnt);
-			if (reg.GetStr(key, FindStr[cnt], sizeof(FindStr[cnt])) != TRUE)
-				FindStr[cnt][0] = '\0';
+			char	key[MAX_PATH_U8];
+			wsprintf(key, "%d", i);
+			if (!reg.GetStr(key, FindStr[i], sizeof(FindStr[i])))
+				FindStr[i][0] = '\0';
 		}
 		reg.CloseKey();
 	}
@@ -388,31 +500,56 @@ BOOL Cfg::ReadRegistry(void)
 		memset(FindStr, 0, MAX_NAMEBUF * FindMax);
 	}
 
+	reg.GetInt(LRUUSERMAX_STR, &lruUserMax);
+	if (reg.OpenKey(LRUUSERKEY_STR)) {
+		for (i=0; ; i++) {
+			wsprintf(buf, "%d", i);
+			if (!reg.OpenKey(buf)) break;
+			UsersObj *obj = new UsersObj;
+			for (int j=0; ; j++) {
+				wsprintf(buf, "%d", j);
+				if (!reg.OpenKey(buf)) break;
+				UserObj *u = new UserObj;
+				if (reg.GetStr(USERNAME_STR, u->hostSub.userName, sizeof(u->hostSub.userName)) &&
+					reg.GetStr(HOSTNAME_STR, u->hostSub.hostName, sizeof(u->hostSub.userName))) {
+					obj->users.AddObj(u);
+				}
+				reg.CloseKey();
+			}
+			reg.CloseKey();
+			lruUserList.AddObj(obj);
+		}
+		reg.CloseKey();
+	}
+
 	*PasswordStr = 0;
 	reg.GetStr(PASSWORD_STR, PasswordStr, sizeof(PasswordStr));
 	reg.GetInt(PASSWDLOGCHECK_STR, &PasswdLogCheck);
 	reg.GetInt(DELAYTIME_STR, &DelayTime);
 	reg.GetInt(QUOTECHECK_STR, &QuoteCheck);
 	reg.GetInt(SECRETCHECK_STR, &SecretCheck);
+	reg.GetInt(LOGONLOG_STR, &LogonLog);
+	reg.GetInt(RECVLOGONDISP_STR, &RecvLogonDisp);
 	reg.GetInt(IPADDRCHECK_STR, &IPAddrCheck);
+	reg.GetInt(RECVIPADDRCHECK_STR, &RecvIPAddr);
 	reg.GetInt(ONECLICKPOPUP_STR, &OneClickPopup);
+	reg.GetInt(BALLOONNOTIFY_STR, &BalloonNotify);
 	reg.GetInt(ABNORMALBTN_STR, &AbnormalButton);
 	reg.GetInt(DIALUPCHECK_STR, &DialUpCheck);
-	reg.GetInt(NICKNAMECHECK_STR, &NickNameCheck);
-	NickNameCheck = NickNameCheck == IPMSG_NICKNAME;
 	reg.GetInt(ABSENCENONPOPUP_STR, &AbsenceNonPopup);
 	reg.GetStr(NICKNAMESTR_STR, NickNameStr, sizeof(NickNameStr));
+	StrictUTF8(NickNameStr);
 	reg.GetStr(GROUPNAMESTR_STR, GroupNameStr, sizeof(GroupNameStr));
-	reg.GetStr(LANG_STR, Lang, sizeof(Lang));
+	StrictUTF8(GroupNameStr);
 	reg.GetLong(SORT_STR, (long *)&Sort);
 //	reg.GetInt(UPDATETIME_STR, &UpdateTime);
 	reg.GetInt(KEEPHOSTTIME_STR, &KeepHostTime);
-	reg.GetInt(MSGMINIMIZE_STR, &MsgMinimize);
 	reg.GetInt(DEFAULTURL_STR, &DefaultUrl);
 	reg.GetInt(SHELLEXEC_STR, &ShellExec);
 	reg.GetInt(EXTENDENTRY_STR, &ExtendEntry);
+	reg.GetInt(EXTENDBROADCAST_STR, &ExtendBroadcast);
 	reg.GetInt(CONTROLIME_STR, &ControlIME);
-	reg.GetInt(GLIDLINE_STR, &GlidLineCheck);
+	reg.GetInt(GRIDLINE_STR, &GridLineCheck);
 	reg.GetInt(COLUMNITEMS_STR, (int *)&ColumnItems);
 	reg.GetStr(QUOTESTR_STR, QuoteStr, sizeof(QuoteStr));
 	if (reg.CreateKey(HOTKEY_STR))
@@ -425,9 +562,10 @@ BOOL Cfg::ReadRegistry(void)
 		reg.CloseKey();
 	}
 	reg.GetInt(LOGCHECK_STR, &LogCheck);
-	reg.GetStr(LOGFILE_STR, LogFile, sizeof(LogFile));
-	if (LogCheck)
-		LogMng::StrictLogFile(LogFile);
+	reg.GetInt(LOGUTF8_STR, &LogUTF8);
+	if (!reg.GetStr(LOGFILE_STR, LogFile, sizeof(LogFile)) || !*LogFile)
+		strncpyz(LogFile, "ipmsg.log", sizeof(LogFile));
+	LogMng::StrictLogFile(LogFile);
 
 	reg.GetStr(SOUNDFILE_STR, SoundFile, sizeof(SoundFile));
 	reg.GetStr(ICON_STR, IconFile, sizeof(IconFile));
@@ -447,26 +585,27 @@ BOOL Cfg::ReadRegistry(void)
 		reg.GetInt(SENDIPADDR_STR, &SendWidth[SW_IPADDR]);
 		if (reg.CreateKey(SENDORDER_STR))
 		{
-			for (int cnt=0; cnt < MAX_SENDWIDTH; cnt++)
+			for (i=0; i < MAX_SENDWIDTH; i++)
 			{
-				wsprintf(buf, "%d", cnt);
-				reg.GetInt(buf, &SendOrder[cnt]);
+				wsprintf(buf, "%d", i);
+				reg.GetInt(buf, &SendOrder[i]);
 			}
 			reg.CloseKey();
 		}
-		for (cnt=0; cnt < MAX_SENDWIDTH; cnt++)
+		for (i=0; i < MAX_SENDWIDTH; i++)
 		{
-			if (SendOrder[cnt] >= MAX_SENDWIDTH || SendOrder[cnt] < 0)
+			if (SendOrder[i] >= MAX_SENDWIDTH || SendOrder[i] < 0)
 				break;
-			for (int cnt2=cnt+1; cnt2 < MAX_SENDWIDTH; cnt2++)
-				if (SendOrder[cnt] == SendOrder[cnt2])
+			int i2;
+			for (i2=i+1; i2 < MAX_SENDWIDTH; i2++)
+				if (SendOrder[i] == SendOrder[i2])
 					break;
-			if (cnt2 != MAX_SENDWIDTH)
+			if (i2 != MAX_SENDWIDTH)
 				break;
 		}
-		if (cnt != MAX_SENDWIDTH)
-			for (cnt=0; cnt < MAX_SENDWIDTH; cnt++)
-				SendOrder[cnt] = cnt;
+		if (i != MAX_SENDWIDTH)
+			for (i=0; i < MAX_SENDWIDTH; i++)
+				SendOrder[i] = i;
 
 		reg.GetInt(SENDXDIFF_STR, &SendXdiff);
 		reg.GetInt(SENDYDIFF_STR, &SendYdiff);
@@ -480,6 +619,14 @@ BOOL Cfg::ReadRegistry(void)
 		reg.GetInt(RECVSAVEPOS_STR, &RecvSavePos);
 		reg.GetInt(RECVXPOS_STR, &RecvXpos);
 		reg.GetInt(RECVYPOS_STR, &RecvYpos);
+
+		reg.GetInt(HISTXDIFF_STR, &HistXdiff);
+		reg.GetInt(HISTYDIFF_STR, &HistYdiff);
+		reg.GetInt(HISTUSER_STR, &HistWidth[HW_USER]);
+		reg.GetInt(HISTODATE_STR, &HistWidth[HW_ODATE]);
+		reg.GetInt(HISTSDATE_STR, &HistWidth[HW_SDATE]);
+		reg.GetInt(HISTID_STR, &HistWidth[HW_ID]);
+
 		reg.CloseKey();
 	}
 
@@ -496,31 +643,32 @@ BOOL Cfg::ReadRegistry(void)
 // Broadcast Data
 	if (reg.CreateKey(BROADCAST_STR))
 	{
-		int		cnt = 0;
+		i = 0;
 		while (1)
 		{
-			wsprintf(buf, "%d", cnt++);
-			if (reg.GetStr(buf, val, sizeof(val)) != TRUE)
+			wsprintf(buf, "%d", i++);
+			if (!reg.GetStr(buf, val, sizeof(val)))
 				break;
-			broadcastList.SetHostRaw(val, (ResolveOpt & RS_REALTIME) ? 0 : ResolveAddr(val));
+			brList.SetHostRaw(val, (ResolveOpt & RS_REALTIME) ? 0 : ResolveAddr(val));
 		}
 		reg.CloseKey();
 	}
 
 // Clickable URL
-	for (cnt=0; DefaultUrlProtocol[cnt] != NULL; cnt++)
+	for (i=0; DefaultUrlProtocol[i]; i++)
 	{
 		UrlObj *obj = new UrlObj;
-		strncpyz(obj->protocol, DefaultUrlProtocol[cnt], sizeof(obj->protocol));
+		strncpyz(obj->protocol, DefaultUrlProtocol[i], sizeof(obj->protocol));
 		*obj->program = 0;
 		urlList.AddObj(obj);
 	}
 
 	if (reg.CreateKey(CLICKABLEURL_STR))
 	{
-		for (cnt = 0; reg.EnumValue(cnt, buf, sizeof(buf)) || reg.EnumKey(cnt, buf, sizeof(buf)); cnt++)
+		for (i = 0; reg.EnumValue(i, buf, sizeof(buf)) || reg.EnumKey(i, buf, sizeof(buf)); i++)
 		{
-			for (UrlObj *obj = (UrlObj *)urlList.TopObj(); obj != NULL; obj = (UrlObj *)urlList.NextObj(obj))
+			UrlObj *obj;
+			for (obj = (UrlObj *)urlList.TopObj(); obj; obj = (UrlObj *)urlList.NextObj(obj))
 				if (stricmp(obj->protocol, buf) == 0)
 					break;
 
@@ -542,14 +690,14 @@ BOOL Cfg::ReadRegistry(void)
 		reg.GetInt(PRIORITYREJECT_STR, &PriorityReject);
 #if 0
 		PrioritySound = new char *[PriorityMax];
-		for (int cnt=0; cnt < PriorityMax; cnt++)
+		for (int i=0; i < PriorityMax; i++)
 		{
-			wsprintf(buf, "%d", cnt);
+			wsprintf(buf, "%d", i);
 
 			if (reg.CreateKey(buf))
 			{
 				if (reg.GetStr(PRIORITYSOUND_STR, buf, sizeof(buf)) && *buf != '\0')
-					PrioritySound[cnt] = strdup(buf);
+					PrioritySound[i] = strdup(buf);
 				reg.CloseKey();
 			}
 		}
@@ -559,19 +707,27 @@ BOOL Cfg::ReadRegistry(void)
 
 	if (reg.CreateKey(HOSTINFO_STR))
 	{
-		int		cnt = 0, priority;
+		int		i = 0, priority = DEFAULT_PRIORITY;
 		Host	*host;
-		time_t	default_time = Time() - KeepHostTime / 2;	// 90 ì˙
+		Time_t	default_time = Time() - KeepHostTime / 2;	// 90 Êó•
 		BOOL	rewriteFlg = FALSE;
 
 		priorityHosts.Enable(THosts::NAME, TRUE);
 		fileHosts.Enable(THosts::NAME_ADDR, TRUE);
-		for (cnt = 0; reg.EnumValue(cnt, buf, sizeof(buf)) || reg.EnumKey(cnt, buf, sizeof(buf)); cnt++)
+		for (i = 0; reg.EnumValue(i, buf, sizeof(buf)) || reg.EnumKey(i, buf, sizeof(buf)); i++)
 		{
-			if (reg.OpenKey(buf) != TRUE)
+			if (!reg.OpenKey(buf))
 				break;
-			if (reg.GetInt(PRIORITY_STR, &priority) != TRUE || priority == DEFAULT_PRIORITY)
+
+			BYTE	pubkey[512];
+			int		pubkeySize = sizeof(pubkey);
+
+			if (!reg.GetByte(PUBLICKEY_STR, pubkey, &pubkeySize)) pubkeySize = 0;
+
+			if ((!reg.GetInt(PRIORITY_STR, &priority) || priority == DEFAULT_PRIORITY)
+					&& pubkeySize == 0) {
 				rewriteFlg = TRUE;
+			}
 			else {
 				host = new Host;
 				host->priority = priority;
@@ -581,43 +737,64 @@ BOOL Cfg::ReadRegistry(void)
 				reg.GetInt(PORTNO_STR, &host->hostSub.portNo);
 				reg.GetStr(NICKNAME_STR, host->nickName, MAX_NAMEBUF);
 				reg.GetStr(GROUPNAME_STR, host->groupName, MAX_NAMEBUF);
-				if (reg.GetLong(UPDATETIME_STR, &host->updateTime) != TRUE)
+				reg.GetStr(ALTERNAME_STR, host->alterName, MAX_NAMEBUF);
+				if (!reg.GetLong(UPDATETIME_STR, (long *)&host->updateTime)) {
 					host->updateTime = default_time;
+				}
+				if (pubkeySize) {
+					host->pubKey.UnSerialize(pubkey, pubkeySize);
+// Âè§„ÅÑ„Ç®„É≥„Éà„É™„ÇíÂâäÈô§„Å´„Åô„ÇãÂá¶ÁêÜ„ÅØ„ÄÅ‰∏ÄÊó¶„ÄÅÊßòÂ≠êË¶ã
+//					char	*p = (char *)GetUserNameDigestField(host->hostSub.userName);
+//					if (p) {
+//						*p = 0;
+//						Host *tmpHost = priorityHosts.GetHostByName(&host->hostSub);
+//						if (tmpHost) {
+//							priorityHosts.DelHost(tmpHost);
+//							if (tmpHost->RefCnt() == 0) delete tmpHost;
+//						}
+//						*p = '-';
+//					}
+				}
 				priorityHosts.AddHost(host);
 			}
 			reg.CloseKey();
 		}
 		reg.CloseKey();
-		if (rewriteFlg)
-			WriteRegistry(CFG_HOSTINFO|CFG_DELHOST);
+		if (rewriteFlg) WriteRegistry(CFG_HOSTINFO|CFG_DELHOST);
 	}
 
-// private/public key
-	if (reg.CreateKey(CRYPT_STR))
-	{
-		BYTE	key[MAX_BUF];		// é¿ç€Ç…ÇÕ 592byte
-		privEncryptSeedLen = privBlobLen = sizeof(key);
+// Self private/public key (1024/2048)
+	for (i=KEY_1024; i <= KEY_2048; i++) {
+		const char *key = (i == KEY_1024) ? CRYPT_STR : CRYPT2_STR;
+		int			need_blob_size = ((i == KEY_1024) ? 1024 : 2048) / 8 * 4;
 
-		if (reg.GetByte(PRIVBLOB_STR, key, &privBlobLen))
+		if (reg.CreateKey(key))
 		{
-			privBlob = new BYTE [privBlobLen];
-			memcpy(privBlob, key, privBlobLen);
+			BYTE	key[MAX_BUF_EX];
+			priv[i].encryptSeedLen = priv[i].blobLen = sizeof(key);
+
+			if (reg.GetByte(PRIVBLOB_STR, key, &priv[i].blobLen)
+				&& priv[i].blobLen > need_blob_size)
+			{
+				priv[i].blob = new BYTE [priv[i].blobLen];
+				memcpy(priv[i].blob, key, priv[i].blobLen);
+			}
+			if (reg.GetByte(PRIVSEED_STR, key, &priv[i].encryptSeedLen))
+			{
+				priv[i].encryptSeed = new BYTE [priv[i].encryptSeedLen];
+				memcpy(priv[i].encryptSeed, key, priv[i].encryptSeedLen);
+			}
+			reg.GetInt(PRIVTYPE_STR, &priv[i].encryptType);
+			reg.CloseKey();
 		}
-		if (reg.GetByte(PRIVSEED_STR, key, &privEncryptSeedLen))
-		{
-			privEncryptSeed = new BYTE [privEncryptSeedLen];
-			memcpy(privEncryptSeed, key, privEncryptSeedLen);
-		}
-		reg.GetInt(PRIVTYPE_STR, &privEncryptType);
-		reg.CloseKey();
 	}
 
-	if (reg.OpenKey(DEBUG_STR))	// ãåÉoÅ[ÉWÉáÉìÉåÉWÉXÉgÉäçÌèú
+	if (reg.OpenKey(DEBUG_STR))	// Êóß„Éê„Éº„Ç∏„Éß„É≥„É¨„Ç∏„Çπ„Éà„É™ÂâäÈô§
 	{
 		reg.CloseKey();
 		reg.DeleteChildTree();
 	}
-	if (reg.GetStr(NULL, buf, sizeof(buf)) != TRUE || strcmp(buf, GetVerionStr()))
+	if (!reg.GetStr(NULL, buf, sizeof(buf)) || strcmp(buf, GetVersionStr()))
 	{
 		reg.CloseKey();		// close top appreg
 		WriteRegistry();
@@ -645,7 +822,7 @@ BOOL Cfg::ReadFontRegistry(TRegistry *reg, char *key, LOGFONT *font)
 		reg->GetInt(CLIPPRECISION_STR, &tmp);	font->lfClipPrecision = (BYTE)tmp;
 		reg->GetInt(QUALITY_STR, &tmp);			font->lfQuality = (BYTE)tmp;
 		reg->GetInt(PITCHANDFAMILY_STR, &tmp);	font->lfPitchAndFamily = (BYTE)tmp;
-		reg->GetStr(FACENAME_STR, font->lfFaceName, sizeof(font->lfFaceName));
+		reg->GetStrA(FACENAME_STR, font->lfFaceName, sizeof(font->lfFaceName));
 		reg->CloseKey();
 	}
 	return	TRUE;
@@ -655,13 +832,15 @@ BOOL Cfg::ReadFontRegistry(TRegistry *reg, char *key, LOGFONT *font)
 BOOL Cfg::WriteRegistry(int ctl_flg)
 {
 	char	buf[MAX_LISTBUF], val[MAX_LISTBUF];
+	int		i;
 
 	GetRegName(buf, nicAddr, portNo);
 	TRegistry	reg(HS_TOOLS, buf);
 
 	if (ctl_flg & CFG_GENERAL)
 	{
-		reg.SetStr(NULL, GetVerionStr());
+		reg.SetStr(NULL, GetVersionStr());
+		reg.SetInt(LCID_KEY, lcid);
 		reg.SetInt(NOBEEP_STR, NoBeep);
 		reg.SetInt(LISTGET_STR, ListGet);
 		reg.SetInt(LISTGETMSEC_STR, (int)ListGetMSec);
@@ -669,16 +848,31 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 		reg.SetInt(RETRYMAX_STR, (int)RetryMax);
 		reg.SetInt(IsWinNT() ? RECVMAXNT_STR : RECVMAX95_STR, (int)RecvMax);
 		reg.SetInt(NOERASE_STR, NoErase);
-		reg.SetInt(DEBUG_STR, Debug);
+//		reg.SetInt(DEBUG_STR, Debug);
 		reg.SetInt(NOPOPUPCHECK_STR, NoPopupCheck);
 		reg.SetInt(OPENCHECK_STR, OpenCheck);
 		reg.SetInt(ALLOWSENDLIST_STR, AllowSendList);
 		reg.SetInt(FILETRANSOPT_STR, fileTransOpt);
 		reg.SetInt(RESOLVEOPT_STR, ResolveOpt);
-		reg.SetInt(ENCRYPTNUM_STR, EncryptNum);
-		reg.SetInt(VIEWMAX_STR, ViewMax);
-		reg.SetInt(TRANSMAX_STR, TransMax);
-		reg.SetInt(TCPBUFMAX_STR, TcpbufMax);
+//		reg.SetInt(ENCRYPTNUM_STR, EncryptNum);
+		reg.SetInt(CLIPMODE_STR, ClipMode);
+//		reg.SetInt(CLIPMAX_STR, ClipMax);
+//		reg.SetInt(CAPTUREDELAY_STR, CaptureDelay);
+//		reg.SetInt(CAPTUREDELAYEX_STR, CaptureDelayEx);
+		reg.SetInt(CAPTUREMINIMIZE_STR, CaptureMinimize);
+		reg.SetInt(CAPTURECLIP_STR, CaptureClip);
+		reg.SetInt(CAPTURESAVE_STR, CaptureSave);
+		reg.SetInt(OPENMSGTIME_STR, OpenMsgTime);
+		reg.SetInt(RECVMSGTIME_STR, RecvMsgTime);
+		reg.SetInt(BALLOONNOINFO_STR, BalloonNoInfo);
+//		reg.SetInt(TASKBARUI_STR, TaskbarUI);
+//		reg.SetInt(MARKERTHICK_STR, MarkerThick);
+
+//		reg.SetInt(VIEWMAX_STR, ViewMax);
+//		reg.SetInt(TRANSMAX_STR, TransMax);
+//		reg.SetInt(TCPBUFMAX_STR, TcpbufMax);
+//		reg.SetInt(IOBUFMAX_STR, IoBufMax);
+		reg.SetInt(LUMPCHECK_STR, LumpCheck);
 	}
 
 	if (ctl_flg & CFG_ABSENCE)
@@ -688,13 +882,13 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 		reg.SetInt(ABSENCEMAX_STR, AbsenceMax);
 		if (reg.CreateKey(ABSENCESTR_STR))
 		{
-			for (int cnt=0; cnt < AbsenceMax; cnt++)
+			for (i=0; i < AbsenceMax; i++)
 			{
-				char	key[MAX_PATH];
-				wsprintf(key, "%s%d", ABSENCESTR_STR, cnt);
-				reg.SetStr(key, AbsenceStr[cnt]);
-				wsprintf(key, "%s%d", ABSENCEHEAD_STR, cnt);
-				reg.SetStr(key, AbsenceHead[cnt]);
+				char	key[MAX_PATH_U8];
+				wsprintf(key, "%s%d", ABSENCESTR_STR, i);
+				reg.SetStr(key, AbsenceStr[i]);
+				wsprintf(key, "%s%d", ABSENCEHEAD_STR, i);
+				reg.SetStr(key, AbsenceHead[i]);
 			}
 		}
 		reg.CloseKey();
@@ -707,22 +901,24 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 		reg.SetInt(DELAYTIME_STR, DelayTime);
 		reg.SetInt(QUOTECHECK_STR, QuoteCheck);
 		reg.SetInt(SECRETCHECK_STR, SecretCheck);
+		reg.SetInt(LOGONLOG_STR, LogonLog);
+		reg.SetInt(RECVLOGONDISP_STR, RecvLogonDisp);
 		reg.SetInt(IPADDRCHECK_STR, IPAddrCheck);
+		reg.SetInt(RECVIPADDRCHECK_STR, RecvIPAddr);
 		reg.SetInt(ONECLICKPOPUP_STR, OneClickPopup);
+		reg.SetInt(BALLOONNOTIFY_STR, BalloonNotify);
 		reg.SetInt(ABNORMALBTN_STR, AbnormalButton);
 		reg.SetInt(DIALUPCHECK_STR, DialUpCheck);
-		reg.SetInt(NICKNAMECHECK_STR, NickNameCheck);
 		reg.SetInt(ABSENCENONPOPUP_STR, AbsenceNonPopup);
 		reg.SetStr(NICKNAMESTR_STR, NickNameStr);
 		reg.SetStr(GROUPNAMESTR_STR, GroupNameStr);
-		reg.SetStr(LANG_STR, Lang);
 		reg.SetLong(SORT_STR, Sort);
 		reg.SetInt(UPDATETIME_STR, UpdateTime);
 		reg.SetInt(KEEPHOSTTIME_STR, KeepHostTime);
-		reg.SetInt(MSGMINIMIZE_STR, MsgMinimize);
 		reg.SetInt(EXTENDENTRY_STR, ExtendEntry);
+		reg.SetInt(EXTENDBROADCAST_STR, ExtendBroadcast);
 		reg.SetInt(CONTROLIME_STR, ControlIME);
-		reg.SetInt(GLIDLINE_STR, GlidLineCheck);
+		reg.SetInt(GRIDLINE_STR, GridLineCheck);
 		reg.SetInt(COLUMNITEMS_STR, ColumnItems);
 		reg.SetStr(QUOTESTR_STR, QuoteStr);
 		if (reg.CreateKey(HOTKEY_STR))
@@ -735,12 +931,14 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 			reg.CloseKey();
 		}
 		reg.SetInt(LOGCHECK_STR, LogCheck);
+		reg.SetInt(LOGUTF8_STR, LogUTF8);
 		reg.SetStr(LOGFILE_STR, LogFile);
 		reg.SetStr(SOUNDFILE_STR, SoundFile);
 		reg.SetStr(ICON_STR, IconFile);
 		reg.SetStr(REVICON_STR, RevIconFile);
 		reg.SetStr(LASTOPEN_STR, lastOpenDir);
 		reg.SetStr(LASTSAVE_STR, lastSaveDir);
+		reg.SetInt(LRUUSERMAX_STR, lruUserMax);
 	}
 
 	if ((ctl_flg & CFG_WINSIZE) && reg.CreateKey(WINSIZE_STR))
@@ -755,10 +953,10 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 
 		if (reg.CreateKey(SENDORDER_STR))
 		{
-			for (int cnt=0; cnt < MAX_SENDWIDTH; cnt++)
+			for (i=0; i < MAX_SENDWIDTH; i++)
 			{
-				wsprintf(buf, "%d", cnt);
-				reg.SetInt(buf, SendOrder[cnt]);
+				wsprintf(buf, "%d", i);
+				reg.SetInt(buf, SendOrder[i]);
 			}
 			reg.CloseKey();
 		}
@@ -776,6 +974,13 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 		reg.SetInt(RECVXPOS_STR, RecvXpos);
 		reg.SetInt(RECVYPOS_STR, RecvYpos);
 
+		reg.SetInt(HISTXDIFF_STR, HistXdiff);
+		reg.SetInt(HISTYDIFF_STR, HistYdiff);
+		reg.SetInt(HISTUSER_STR, HistWidth[HW_USER]);
+		reg.SetInt(HISTODATE_STR, HistWidth[HW_ODATE]);
+		reg.SetInt(HISTSDATE_STR, HistWidth[HW_SDATE]);
+		reg.SetInt(HISTID_STR, HistWidth[HW_ID]);
+
 		reg.CloseKey();
 	}
 
@@ -790,18 +995,18 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 
 	if ((ctl_flg & CFG_BROADCAST) && reg.CreateKey(BROADCAST_STR))
 	{
-		int		cnt = 0;
-		for (TBroadcastObj *obj=broadcastList.Top(); obj; obj=broadcastList.Next(obj))
+		i = 0;
+		for (TBrObj *obj=brList.Top(); obj; obj=brList.Next(obj))
 		{
-			wsprintf(buf, "%d", cnt++);
+			wsprintf(buf, "%d", i++);
 			reg.SetStr(buf, obj->Host());
 		}
 		while (1)
 		{
-			wsprintf(buf, "%d", cnt++);
-			if (reg.GetStr(buf, val, sizeof(val)) != TRUE)
+			wsprintf(buf, "%d", i++);
+			if (!reg.GetStr(buf, val, sizeof(val)))
 				break;
-			if (reg.DeleteValue(buf) != TRUE)
+			if (!reg.DeleteValue(buf))
 				break;
 		}
 		reg.CloseKey();
@@ -814,7 +1019,7 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 		if (reg.CreateKey(CLICKABLEURL_STR))
 		{
 
-			for (UrlObj *obj = (UrlObj *)urlList.TopObj(); obj != NULL; obj = (UrlObj *)urlList.NextObj(obj))
+			for (UrlObj *obj = (UrlObj *)urlList.TopObj(); obj; obj = (UrlObj *)urlList.NextObj(obj))
 				reg.SetStr(obj->protocol, obj->program);
 			reg.CloseKey();
 		}
@@ -825,13 +1030,13 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 		reg.SetInt(PRIORITYMAX_STR, PriorityMax);
 		reg.SetInt(PRIORITYREJECT_STR, PriorityReject);
 #if 0
-		for (int cnt=0; cnt < PriorityMax; cnt++)
+		for (i=0; i < PriorityMax; i++)
 		{
-			wsprintf(buf, "%d", cnt);
+			wsprintf(buf, "%d", i);
 
 			if (reg.CreateKey(buf))
 			{
-				reg.SetStr(PRIORITYSOUND_STR, PrioritySound[cnt] ? PrioritySound[cnt] : "");
+				reg.SetStr(PRIORITYSOUND_STR, PrioritySound[i] ? PrioritySound[i] : "");
 				reg.CloseKey();
 			}
 		}
@@ -841,17 +1046,21 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 
 	if ((ctl_flg & CFG_HOSTINFO) && reg.CreateKey(HOSTINFO_STR))
 	{
-		int cnt;
-		time_t	now_time = Time();
+		Time_t	now_time = Time();
+		BYTE	pubkey[MAX_BUF];
+		int		pubkeySize;
 
 		if (ctl_flg & CFG_DELHOST)
 			reg.DeleteChildTree();
 
-		for (cnt=0; cnt < priorityHosts.HostCnt(); cnt++)
+		for (i=0; i < priorityHosts.HostCnt(); i++)
 		{
-			Host	*host = priorityHosts.GetHost(cnt);
+			Host	*host = priorityHosts.GetHost(i);
+			int		to_store_size = 2048 / 8; // 2048bits RSA key
 			wsprintf(buf, "%s:%s", host->hostSub.userName, host->hostSub.hostName);
-			if (host->updateTime + KeepHostTime < now_time || host->priority == DEFAULT_PRIORITY)
+
+			if (host->updateTime + KeepHostTime < now_time ||
+				(host->pubKey.KeyLen() < to_store_size && host->priority == DEFAULT_PRIORITY))
 			{
 				if (ctl_flg & CFG_DELCHLDHOST)
 					reg.DeleteChildTree(buf);
@@ -864,8 +1073,15 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 				reg.SetInt(PORTNO_STR, host->hostSub.portNo);
 				reg.SetStr(NICKNAME_STR, host->nickName);
 				reg.SetStr(GROUPNAME_STR, host->groupName);
+				if (*host->alterName) reg.SetStr(ALTERNAME_STR, host->alterName);
 				reg.SetInt(PRIORITY_STR, host->priority);
-				reg.SetLong(UPDATETIME_STR, host->updateTime);
+				reg.SetLong(UPDATETIME_STR, (long)host->updateTime);
+				if (host->pubKey.KeyLen() >= to_store_size) {
+					char	*p = (char *)GetUserNameDigestField(host->hostSub.userName);
+					if (p && (pubkeySize = host->pubKey.Serialize(pubkey, sizeof(pubkey))) > 0) {
+						reg.SetByte(PUBLICKEY_STR, pubkey, pubkeySize);
+					}
+				}
 				reg.CloseKey();
 			}
 		}
@@ -876,23 +1092,51 @@ BOOL Cfg::WriteRegistry(int ctl_flg)
 	{
 		reg.SetInt(FINDMAX_STR, FindMax);
 		reg.SetInt(FINDALL_STR, FindAll);
-		for (int cnt=0; cnt < FindMax; cnt++)
+		for (i=0; i < FindMax; i++)
 		{
-			char	key[MAX_PATH];
-			wsprintf(key, "%d", cnt);
-			reg.SetStr(key, FindStr[cnt]);
+			char	key[MAX_PATH_U8];
+			wsprintf(key, "%d", i);
+			reg.SetStr(key, FindStr[i]);
 		}
 		reg.CloseKey();
 	}
 
+	if (ctl_flg & CFG_LRUUSER) {
+		reg.DeleteChildTree(LRUUSERKEY_STR);
+		if (reg.CreateKey(LRUUSERKEY_STR)) {
+			UsersObj *obj=(UsersObj *)lruUserList.TopObj();
+			for (i=0; obj; i++) {
+				wsprintf(buf, "%d", i);
+				if (!reg.CreateKey(buf)) break;
+				UserObj *u = (UserObj *)obj->users.TopObj();
+				for (int j=0; u; j++) {
+					wsprintf(buf, "%d", j);
+					if (!reg.CreateKey(buf)) break;
+					reg.SetStr(USERNAME_STR, u->hostSub.userName);
+					reg.SetStr(HOSTNAME_STR, u->hostSub.hostName);
+					reg.CloseKey();
+					u = (UserObj *)obj->users.NextObj(u);
+				}
+				reg.CloseKey();
+				obj = (UsersObj *)lruUserList.NextObj(obj);
+			}
+			reg.CloseKey();
+		}
+	}
+
 // private/public key
-	if ((ctl_flg & CFG_CRYPT) && privBlob && reg.CreateKey(CRYPT_STR))
-	{
-		reg.SetByte(PRIVBLOB_STR, privBlob, privBlobLen);
-		if (privEncryptSeed)
-			reg.SetByte(PRIVSEED_STR, privEncryptSeed, privEncryptSeedLen);
-		reg.SetInt(PRIVTYPE_STR, privEncryptType);
-		reg.CloseKey();
+	if (ctl_flg & CFG_CRYPT) {
+		for (int i=KEY_1024; i <= KEY_2048; i++) {
+			const char *key = (i == KEY_1024) ? CRYPT_STR : CRYPT2_STR;
+			if (reg.CreateKey(key) && priv[i].blob)
+			{
+				reg.SetByte(PRIVBLOB_STR, priv[i].blob, priv[i].blobLen);
+				if (priv[i].encryptSeed)
+					reg.SetByte(PRIVSEED_STR, priv[i].encryptSeed, priv[i].encryptSeedLen);
+				reg.SetInt(PRIVTYPE_STR, priv[i].encryptType);
+				reg.CloseKey();
+			}
+		}
 	}
 
 	return	TRUE;
@@ -916,7 +1160,7 @@ BOOL Cfg::WriteFontRegistry(TRegistry *reg, char *key, LOGFONT *font)
 		reg->SetInt(CLIPPRECISION_STR, (int)font->lfClipPrecision);
 		reg->SetInt(QUALITY_STR, (int)font->lfQuality);
 		reg->SetInt(PITCHANDFAMILY_STR, (int)font->lfPitchAndFamily);
-		reg->SetStr(FACENAME_STR, font->lfFaceName);
+		reg->SetStrA(FACENAME_STR, font->lfFaceName);
 		reg->CloseKey();
 	}
 	return	TRUE;
@@ -924,10 +1168,15 @@ BOOL Cfg::WriteFontRegistry(TRegistry *reg, char *key, LOGFONT *font)
 
 void Cfg::GetRegName(char *buf, ULONG nic_addr, int port_no)
 {
-	buf += wsprintf(buf, "%s", IPMSG_MSGSTR);
+	buf += wsprintf(buf, "%s", GetLoadStr(IDS_IPMSG));
 	if (port_no != IPMSG_DEFAULT_PORT)
 		buf += wsprintf(buf, "%d", port_no);
 	if (nic_addr)
-		buf += wsprintf(buf, "_%s", inet_ntoa(*(in_addr *)&nic_addr));
+		buf += wsprintf(buf, "_%s", Tinet_ntoa(*(in_addr *)&nic_addr));
+}
+
+void Cfg::GetSelfRegName(char *buf)
+{
+	GetRegName(buf, nicAddr, portNo);
 }
 

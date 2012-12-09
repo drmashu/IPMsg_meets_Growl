@@ -1,28 +1,19 @@
-static char *mainwin_id = 
-	"@(#)Copyright (C) H.Shirouzu 1996-2004   mainwin.cpp	Ver2.06_GfW (Modifyed by snaka 2009-04-29)";
-/* =========================================================================
-	Project  Name			: IP Messenger for Win32
+Ôªøstatic char *mainwin_id = 
+	"@(#)Copyright (C) H.Shirouzu 1996-2012   mainwin.cpp	Ver3.42";
+/* ========================================================================
+	Project  NameF			: IP Messenger for Win32
 	Module Name				: Main Window
 	Create					: 1996-06-01(Sat)
-	Update					: 2004-09-08(Wed)
+	Update					: 2012-06-10(Sun)
 	Copyright				: H.Shirouzu
 	Reference				: 
 	======================================================================== */
-/* 
-    Modified by snaka (snaka.gml@gmail.com) 2009-04-29
-	Add growling feature using Growl for Windows during settings to 
-	"Non popup notification" mode.
- */
-#include <stdio.h>
 
-#include "tlib.h"
+#include <stdio.h>
 #include "resource.h"
 #include "ipmsg.h"
-#include "msgstr.h"
-#include "blowfish.h"
 
 #include "Growl.h"
-#include "sjis2u.h"
 
 HICON		TMainWin::hMainIcon = NULL;
 HICON		TMainWin::hRevIcon = NULL;
@@ -30,26 +21,33 @@ TMainWin	*TMainWin::mainWin = NULL;
 static HWND	hMainWnd = NULL;
 
 /*
-	MainWindow ÇÃèâä˙âª
+	MainWindow „ÅÆÂàùÊúüÂåñ
 */
 TMainWin::TMainWin(ULONG nicAddr, int _portNo, TWin *_parent) : TWin(_parent)
 {
+	char	title[100];
+	sprintf(title, "IPMsg ver%s", GetVersionStr());
+	InstallExceptionFilter(title, GetLoadStr(IDS_EXCEPTIONLOG));
+
 	hosts.Enable(THosts::NAME, TRUE);
 	hosts.Enable(THosts::ADDR, TRUE);
 	cfg = new Cfg(nicAddr, portNo = _portNo);
-	if ((msgMng = new MsgMng(nicAddr, portNo, cfg))->GetStatus() == FALSE)
-	{
+
+	if (!(msgMng = new MsgMng(nicAddr, portNo, cfg))->GetStatus()) {
 		::ExitProcess(0xffffffff);
 		return;
 	}
 	cfg->ReadRegistry();
+	if (cfg->lcid > 0) TSetDefaultLCID(cfg->lcid);
+
 	setupDlg = new TSetupDlg(cfg, &hosts);
 	aboutDlg = new TAboutDlg();
 	absenceDlg = new TAbsenceDlg(cfg, this);
 	logmng = new LogMng(cfg);
-	ansList = new TRecycleList(MAX_ANSLIST, sizeof(AddrObj));
+	ansList = new TRecycleList(MAX_ANSLIST, sizeof(AnsQueueObj));
 	shareMng = new ShareMng(cfg);
 	shareStatDlg = new TShareStatDlg(shareMng, cfg);
+	histDlg = new THistDlg(cfg, &hosts);
 	refreshStartTime = 0;
 	entryStartTime = IPMSG_GETLIST_FINISH;
 
@@ -58,21 +56,26 @@ TMainWin::TMainWin(ULONG nicAddr, int _portNo, TWin *_parent) : TWin(_parent)
 
 	entryTimerStatus = 0;
 	reverseTimerStatus = 0;
+	reverseCount = 0;
 	ansTimerID = 0;
 	terminateFlg = FALSE;
 	activeToggle = TRUE;
+	writeRegFlags = CFG_HOSTINFO|CFG_DELCHLDHOST|CFG_LRUUSER;
+	trayMode = TRAY_NORMAL;
+	*trayMsg = 0;
 
 	InitIcon();
+	MakeBrListEx();
 
-	hAccel = ::LoadAccelerators(TApp::hI, (LPCSTR)IPMSG_ACCEL);
+	hAccel = ::LoadAccelerators(TApp::GetInstance(), (LPCSTR)IPMSG_ACCEL);
 }
 
 /*
-	MainWindow èIóπ
+	MainWindow ÁµÇ‰∫Ü
 */
 TMainWin::~TMainWin()
 {
-#if 0	// ñ≥ë 
+#if 0	// ÁÑ°ÈßÑ
 	delete msgMng;
 	delete cfg;
 	delete ansList;
@@ -80,7 +83,7 @@ TMainWin::~TMainWin()
 }
 
 /*
-	éqWindow Ç®ÇÊÇ— socketÇÃèIóπÇ∆èäóLMemoryÇÃäJï˙
+	Â≠êWindow „Åä„Çà„Å≥ socket„ÅÆÁµÇ‰∫Ü„Å®ÊâÄÊúâMemory„ÅÆÈñãÊîæ
 */
 void TMainWin::Terminate(void)
 {
@@ -88,90 +91,122 @@ void TMainWin::Terminate(void)
 		return;
 	terminateFlg = TRUE;
 
-	if (msgMng->GetStatus() != TRUE)
+	if (!msgMng->GetStatus())
 		return;
 
 	ExitHost();
 	DeleteListDlg(&sendList);
 	DeleteListDlg(&recvList);
 	DeleteListDlg(&msgList);
-	delete aboutDlg;
+	delete histDlg;
 	delete shareStatDlg;
 	delete absenceDlg;
+	delete aboutDlg;
 	delete setupDlg;
 
-	if (IsNewShell())
-		TaskBar(NIM_DELETE);
+//	if (!cfg->TaskbarUI)
+		TaskTray(NIM_DELETE);
 
-	time_t	now_time = Time();
-	for (int cnt=0; cnt < hosts.HostCnt(); cnt++)
+	if (IsWin7() && cfg->TaskbarUI) {
+		DeleteJumpList();
+	}
+
+	Time_t	now_time = Time();
+	for (int cnt=0; cnt < hosts.HostCnt(); cnt++) {
 		hosts.GetHost(cnt)->updateTime = now_time;
-	cfg->WriteRegistry(CFG_HOSTINFO|CFG_DELCHLDHOST);
+	}
+	cfg->WriteRegistry(writeRegFlags);
 
 	msgMng->CloseSocket();
-	if (cfg->hPrivKey)
-		pCryptDestroyKey(cfg->hPrivKey);
-	if (cfg->hSmallPrivKey)
-		pCryptDestroyKey(cfg->hSmallPrivKey);
 
-#if 0	// ñ≥ë 
+	for (int i=0; i < MAX_KEY; i++) {
+		if (cfg->priv[i].hKey) pCryptDestroyKey(cfg->priv[i].hKey);
+	}
+
+#if 0	// ÁÑ°ÈßÑ
 	delete logmng;
 
 	Host *host;
-	while (hosts.HostCnt() > 0)
-	{
+	while (hosts.HostCnt() > 0) {
 		hosts.DelHost(host = hosts.GetHost(0));
 //		delete host;
 	}
 
 	AddrObj *brObj;
-	while ((brObj = (AddrObj *)cfg->DialUpList.TopObj()) != NULL)
-	{
+	while ((brObj = (AddrObj *)cfg->DialUpList.TopObj())) {
 		cfg->DialUpList.DelObj(brObj);
 		delete brObj;
 	}
 #endif
 }
 
+BOOL TMainWin::Create(LPCSTR class_name, LPCSTR title, DWORD, DWORD, HMENU)
+{
+	className = strdup(class_name);
+	DWORD style = WS_OVERLAPPEDWINDOW|(cfg->TaskbarUI ? 0 : WS_MINIMIZE);
+	return	TWin::CreateU8(className, IP_MSG, style, 0, 0);
+}
+
 /*
-	MainWindow ê∂ê¨éûÇÃ CallBack
-	New Shell Ç»ÇÁÅATaskTray Ç… iconìoò^ÅAÇªÇ§Ç≈Ç»Ç¢Ç»ÇÁ iconâª
-	Packet éÛêMäJénÅAEntry PacketÇÃëóèo
+	MainWindow ÁîüÊàêÊôÇ„ÅÆ CallBack
+	New Shell „Å™„Çâ„ÄÅTaskTray „Å´ iconÁôªÈå≤„ÄÅ„Åù„ÅÜ„Åß„Å™„ÅÑ„Å™„Çâ iconÂåñ
+	Packet Âèó‰ø°ÈñãÂßã„ÄÅEntry Packet„ÅÆÈÄÅÂá∫
 */
 BOOL TMainWin::EvCreate(LPARAM lParam)
 {
 	hMainWnd = hWnd;
 	mainWin = this;
 
-	if (msgMng->GetStatus() != TRUE)
-		return	TRUE;
-
-	if (IsNewShell())
-	{
-		Show(SW_HIDE);
-		while (TaskBar(NIM_ADD, hMainIcon, IPMSG_MSGSTR) != TRUE)
-			Sleep(1000);	// for logon script
+	if (IsWinVista() && TIsUserAnAdmin() && TIsEnableUAC()) {
+		TChangeWindowMessageFilter(WM_DROPFILES, 1);
+		TChangeWindowMessageFilter(WM_COPYDATA, 1);
+		TChangeWindowMessageFilter(WM_COPYGLOBALDATA, 1);
+		TChangeWindowMessageFilter(WM_CLOSE, 1);
 	}
-	else
+
+	if (!msgMng->GetStatus()) return TRUE;
+
+	if (cfg->TaskbarUI) {
 		Show(SW_MINIMIZE);
-	TaskBarCreateMsg= ::RegisterWindowMessage("TaskbarCreated");
+	} else {
+		Show(SW_HIDE);
+	}
+	while (!TaskTray(NIM_ADD, hMainIcon, IP_MSG)) {
+		Sleep(1000);	// for logon script
+	}
 
-	SetIcon(cfg->AbsenceCheck == FALSE ? hMainIcon : hRevIcon);
+	TaskBarCreateMsg = ::RegisterWindowMessage("TaskbarCreated");
+	TaskBarButtonMsg = ::RegisterWindowMessage("TaskbarButtonCreated");
+	TaskBarNotifyMsg = ::RegisterWindowMessage(IP_MSG);
+
+	SetIcon(cfg->AbsenceCheck ? hRevIcon : hMainIcon);
 	SetCaption();
-	if (SetupCryptAPI() == FALSE)
-		MessageBox("CryptoAPI can't be used. Setup New version IE");
+	if (!SetupCryptAPI(cfg, msgMng)) MessageBoxU8("CryptoAPI can't be used. Setup New version IE");
 
-	msgMng->AsyncSelectRegist(hWnd);
+	msgMng->AsyncSelectRegister(hWnd);
 	SetHotKey(cfg);
 
-	if (msgMng->GetStatus())
+	if (msgMng->GetStatus()) {
 		EntryHost();
+	}
 
+	if (IsWin7()) {	// for TaskbarUI
+		::CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); 
+
+		if (cfg->TaskbarUI) {
+			CreateJumpList(className);
+		}
+		else {
+//			DeleteJumpList();
+		}
+	}
+
+	::SetTimer(hWnd, IPMSG_CLEANUP_TIMER, 60000, NULL); // 1min
 	return	TRUE;
 }
 
 /*
-	Task ManagerÇ»Ç«Ç©ÇÁÇÃèIóπóvãÅ
+	Task Manager„Å™„Å©„Åã„Çâ„ÅÆÁµÇ‰∫ÜË¶ÅÊ±Ç
 */
 BOOL TMainWin::EvClose(void)
 {
@@ -182,19 +217,17 @@ BOOL TMainWin::EvClose(void)
 
 /*
 	Timer Callback
-	NonPopupéÛêMéûÇÃ iconîΩì]
-	ListGet ModeÇ…Ç®ÇØÇÈÅAHostListóvãÅ/éÛêMèàóù
+	NonPopupÂèó‰ø°ÊôÇ„ÅÆ iconÂèçËª¢
+	ListGet Mode„Å´„Åä„Åë„Çã„ÄÅHostListË¶ÅÊ±Ç/Âèó‰ø°Âá¶ÁêÜ
 */
 BOOL TMainWin::EvTimer(WPARAM timerID, TIMERPROC proc)
 {
-	if (terminateFlg)
-	{
+	if (terminateFlg) {
 		::KillTimer(hWnd, timerID);
 		return	TRUE;
 	}
 
-	switch (timerID)
-	{
+	switch (timerID) {
 	case IPMSG_REVERSEICON:
 		ReverseIcon(FALSE);
 		return	TRUE;
@@ -202,11 +235,12 @@ BOOL TMainWin::EvTimer(WPARAM timerID, TIMERPROC proc)
 	case IPMSG_LISTGET_TIMER:
 		::KillTimer(hWnd, IPMSG_LISTGET_TIMER);
 		entryTimerStatus = 0;
-		if (entryStartTime != IPMSG_GETLIST_FINISH)
-		{
+
+		if (entryStartTime != IPMSG_GETLIST_FINISH) {
 			entryStartTime = Time();
-			if (::SetTimer(hWnd, IPMSG_LISTGETRETRY_TIMER, cfg->ListGetMSec, NULL))
+			if (::SetTimer(hWnd, IPMSG_LISTGETRETRY_TIMER, cfg->ListGetMSec, NULL)) {
 				entryTimerStatus = IPMSG_LISTGETRETRY_TIMER;
+			}
 			BroadcastEntry(IPMSG_BR_ISGETLIST2 | IPMSG_RETRYOPT);
 		}
 		return	TRUE;
@@ -214,11 +248,10 @@ BOOL TMainWin::EvTimer(WPARAM timerID, TIMERPROC proc)
 	case IPMSG_LISTGETRETRY_TIMER:
 		::KillTimer(hWnd, IPMSG_LISTGETRETRY_TIMER);
 		entryTimerStatus = 0;
-		if (entryStartTime != IPMSG_GETLIST_FINISH)
-		{
+
+		if (entryStartTime != IPMSG_GETLIST_FINISH) {
 			entryStartTime = IPMSG_GETLIST_FINISH;
-			if (cfg->ListGet)
-				BroadcastEntry(IPMSG_BR_ENTRY);
+			if (cfg->ListGet) BroadcastEntry(IPMSG_BR_ENTRY);
 		}
 		return	TRUE;
 
@@ -228,14 +261,40 @@ BOOL TMainWin::EvTimer(WPARAM timerID, TIMERPROC proc)
 		ExecuteAnsQueue();
 		return	TRUE;
 
+	case IPMSG_CLEANUP_TIMER:
+		shareMng->Cleanup();
+		return	TRUE;
+
+	case IPMSG_BALLOON_RECV_TIMER:
+	case IPMSG_BALLOON_OPEN_TIMER:
+		::KillTimer(hWnd, timerID);
+		if (timerID == IPMSG_BALLOON_RECV_TIMER && trayMode == TRAY_RECV ||
+			timerID == IPMSG_BALLOON_OPEN_TIMER && trayMode == TRAY_OPENMSG) {
+			trayMode = TRAY_NORMAL;
+			BalloonWindow(TRAY_NORMAL);
+		}
+		return	TRUE;
+
+	case IPMSG_BALLOON_DELAY_TIMER:
+		if (::GetForegroundWindow()) {
+			::KillTimer(hWnd, timerID);
+			if (BalloonWindow(TRAY_OPENMSG, trayMsg, GetLoadStrU8(IDS_DELAYOPEN),
+								cfg->OpenMsgTime + IPMSG_DELAYMSG_OFFSETTIME)) {
+				*trayMsg = 0;
+			}
+		}
+		return	TRUE;
+
 	case IPMSG_ENTRY_TIMER:
 		::KillTimer(hWnd, IPMSG_ENTRY_TIMER);
 
-		for (TBroadcastObj *brobj=cfg->broadcastList.Top(); brobj; brobj=cfg->broadcastList.Next(brobj))
-			BroadcastEntrySub(brobj->Addr(), htons(portNo), IPMSG_BR_ENTRY);
+		for (TBrObj *brobj=brListEx.Top(); brobj; brobj=brListEx.Next(brobj)) {
+			BroadcastEntrySub(brobj->Addr(), Thtons(portNo), IPMSG_BR_ENTRY);
+		}
 
-		for (AddrObj *obj = (AddrObj *)cfg->DialUpList.TopObj(); obj != NULL; obj = (AddrObj *)cfg->DialUpList.NextObj(obj))
+		for (AddrObj *obj = (AddrObj *)cfg->DialUpList.TopObj(); obj; obj = (AddrObj *)cfg->DialUpList.NextObj(obj)) {
 			BroadcastEntrySub(obj->addr, obj->portNo, IPMSG_BR_ENTRY);
+		}
 		return	TRUE;
 	}
 
@@ -247,14 +306,22 @@ BOOL TMainWin::EvTimer(WPARAM timerID, TIMERPROC proc)
 */
 BOOL TMainWin::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 {
-	switch (wID)
-	{
+	switch (wID) {
 	case MENU_SETUP:
 		MiscDlgOpen(setupDlg);
 		return	TRUE;
 
 	case MENU_LOGOPEN:
 		LogOpen();
+		return	TRUE;
+
+	case MENU_LOGIMGOPEN:
+		{
+			char	path[MAX_PATH_U8];
+			if (MakeImageFolder(cfg, path)) {
+				ShellExecuteU8(NULL, NULL, path, 0, 0, SW_SHOW);
+			}
+		}
 		return	TRUE;
 
 	case MENU_ABOUT:
@@ -272,11 +339,19 @@ BOOL TMainWin::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 	case MENU_ABSENCE:
 		cfg->AbsenceCheck = !cfg->AbsenceCheck;
 		BroadcastEntry(IPMSG_BR_ABSENCE); 
-		SetIcon(cfg->AbsenceCheck == FALSE ? hMainIcon : hRevIcon);
+		SetIcon(cfg->AbsenceCheck ? hRevIcon : hMainIcon);
 		return	TRUE;
 
 	case MENU_ABSENCEEX:
 		MiscDlgOpen(absenceDlg);
+		return	TRUE;
+
+	case MENU_HELP:
+		ShowHelpU8(hWnd, cfg->execDir, GetLoadStrU8(IDS_IPMSGHELP), "#usage");
+		return	TRUE;
+
+	case MENU_HELP_HISTORY:
+		ShowHelpU8(hWnd, cfg->execDir, GetLoadStrU8(IDS_IPMSGHELP), "#history");
 		return	TRUE;
 
 	case HIDE_ACCEL:
@@ -284,8 +359,12 @@ BOOL TMainWin::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 		return	TRUE;
 
 	case MISC_ACCEL:
-	case MENU_DELMISCDLG:
 		DeleteListDlg(&msgList);
+		return	TRUE;
+
+	case MENU_OPENHISTDLG:
+		histDlg->SetMode(FALSE);
+		MiscDlgOpen(histDlg);
 		return	TRUE;
 
 	case MENU_EXIT:
@@ -295,8 +374,7 @@ BOOL TMainWin::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 		return	TRUE;
 
 	default:
-		if (wID >= (UINT)MENU_ABSENCE_START && wID < (UINT)MENU_ABSENCE_START + cfg->AbsenceMax)
-		{
+		if (wID >= (UINT)MENU_ABSENCE_START && wID < (UINT)MENU_ABSENCE_START + cfg->AbsenceMax) {
 			cfg->AbsenceChoice = wID - MENU_ABSENCE_START;
 			cfg->AbsenceCheck = FALSE;
 			EvCommand(0, MENU_ABSENCE, 0);
@@ -311,56 +389,58 @@ BOOL TMainWin::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 */
 BOOL TMainWin::EvSysCommand(WPARAM uCmdType, POINTS pos)
 {
-	switch (uCmdType)
-	{
+	switch (uCmdType) {
 	case SC_RESTORE: case SC_MAXIMIZE:
-		if (!IsNewShell())
-			SendDlgOpen();
+		if (cfg->TaskbarUI) {
+			if (!PopupCheck()) {
+				SendDlgOpen();
+			}
+		}
 		return	TRUE;
 
 	case MENU_SETUP:
 	case MENU_LOGOPEN:
+	case MENU_LOGIMGOPEN:
 	case MENU_ABOUT:
 	case MENU_SHARE:
 	case MENU_ACTIVEWIN:
-	case MENU_DELMISCDLG:
+	case MENU_OPENHISTDLG:
 	case MENU_ABSENCE:
 	case MENU_ABSENCEEX:
 	case MENU_EXIT:
-		return	EvCommand(0, uCmdType, 0);
+		return	EvCommand(0, (WORD)uCmdType, 0);
 
 	default:
-		if (uCmdType >= MENU_ABSENCE_START && (int)uCmdType < MENU_ABSENCE_START + cfg->AbsenceMax)
-			return	EvCommand(0, uCmdType, 0);
+		if (uCmdType >= MENU_ABSENCE_START &&
+			(int)uCmdType < MENU_ABSENCE_START + cfg->AbsenceMax) {
+			return	EvCommand(0, (WORD)uCmdType, 0);
+		}
 		break;
 	}
 	return	FALSE;
 }
 
 /*
-	LogoutéûÇ»Ç«ÇÃèIóπí ím CallBack
+	LogoutÊôÇ„Å™„Å©„ÅÆÁµÇ‰∫ÜÈÄöÁü• CallBack
 */
 BOOL TMainWin::EvEndSession(BOOL nSession, BOOL nLogOut)
 {
-	if (nSession)
-		Terminate();
+	if (nSession) Terminate();
 	return	TRUE;
 }
 
 /*
-	iconÇí èÌWindowÇ…ñﬂÇµÇƒÇÊÇ¢Ç©Ç«Ç§Ç©ÇÃñ‚Ç¢çáÇÌÇπ CallBack
+	icon„ÇíÈÄöÂ∏∏Window„Å´Êàª„Åó„Å¶„Çà„ÅÑ„Åã„Å©„ÅÜ„Åã„ÅÆÂïè„ÅÑÂêà„Çè„Åõ CallBack
 */
 BOOL TMainWin::EvQueryOpen(void)
 {
-	if (!IsNewShell())
-		SendDlgOpen();
+	if (cfg->TaskbarUI) SendDlgOpen();
 	return	TRUE;
 }
 
 BOOL TMainWin::EvHotKey(int hotKey)
 {
-	switch (hotKey)
-	{
+	switch (hotKey) {
 	case WM_SENDDLG_OPEN:
 	case WM_DELMISCDLG:
 	case WM_RECVDLG_OPEN:
@@ -374,8 +454,7 @@ BOOL TMainWin::EvHotKey(int hotKey)
 */
 BOOL TMainWin::EventButton(UINT uMsg, int nHitTest, POINTS pos)
 {
-	switch (uMsg)
-	{
+	switch (uMsg) {
 //	case WM_RBUTTONDOWN:
 //	case WM_NCRBUTTONDOWN:
 	case WM_RBUTTONUP:
@@ -385,12 +464,16 @@ BOOL TMainWin::EventButton(UINT uMsg, int nHitTest, POINTS pos)
 
 	case WM_LBUTTONDBLCLK:
 	case WM_NCLBUTTONDBLCLK:
-		if (cfg->OneClickPopup == FALSE)
-			SendDlgOpen();
+		if (!cfg->OneClickPopup) SendDlgOpen();
 		return	TRUE;
 
 	case WM_LBUTTONDOWN:
 	case WM_NCLBUTTONDOWN:
+		if (trayMode == TRAY_RECV && cfg->OneClickPopup) {
+			trayMode = TRAY_NORMAL;
+			break;
+		}
+
 		SetForegroundWindow();
 
 		BOOL ctl_on = (GetAsyncKeyState(VK_CONTROL) & 0x8000) ? TRUE : FALSE;
@@ -399,21 +482,18 @@ BOOL TMainWin::EventButton(UINT uMsg, int nHitTest, POINTS pos)
 
 //		if (ctl_on && !menu_on)
 //			return	PostMessage(WM_COMMAND, MENU_ABSENCE, 0), TRUE;
-		if (shift_on && !menu_on)
-			return	PostMessage(WM_COMMAND, MENU_ACTIVEWIN, 0), TRUE;
+		if (shift_on && !menu_on) return PostMessage(WM_COMMAND, MENU_ACTIVEWIN, 0), TRUE;
 
-		if (!IsNewShell() && cfg->MsgMinimize == FALSE)
-			ActiveListDlg(&msgList);
+		if (cfg->TaskbarUI) ActiveListDlg(&msgList);
 
-		for (TSendDlg *dlg = (TSendDlg *)sendList.TopObj(); dlg != NULL; dlg = (TSendDlg *)sendList.NextObj(dlg))
-			if (dlg->IsSending())
-				dlg->SetForegroundWindow();	// çƒëóêMämîFÉ_ÉCÉAÉçÉOÇëOÇ…
+		for (TSendDlg *dlg = (TSendDlg *)sendList.TopObj(); dlg; dlg = (TSendDlg *)sendList.NextObj(dlg)) {
+			if (dlg->IsSending()) dlg->SetForegroundWindow();	// ÂÜçÈÄÅ‰ø°Á¢∫Ë™ç„ÉÄ„Ç§„Ç¢„É≠„Ç∞„ÇíÂâç„Å´
+		}
 
-		if (PopupCheck())
-			return	TRUE;
+		if (PopupCheck()) return TRUE;
 
-		if (cfg->OneClickPopup)
-			PostMessage(WM_SENDDLG_OPEN, 0, 0);
+		if (cfg->OneClickPopup) PostMessage(WM_SENDDLG_OPEN, 0, 0);
+
 		return	FALSE;
 	}
 	return	FALSE;
@@ -425,34 +505,8 @@ BOOL TMainWin::EventButton(UINT uMsg, int nHitTest, POINTS pos)
 */
 BOOL TMainWin::EventInitMenu(UINT uMsg, HMENU hMenu, UINT uPos, BOOL fSystemMenu)
 {
-	switch (uMsg)
-	{
+	switch (uMsg) {
 	case WM_INITMENU:
-		if (IsNewShell() != TRUE && GetMenuItemID(hMenu, 0) != MENU_DELMISCDLG)
-		{
-			HMENU	hTargetMenu;
-			char	buf[MAX_LISTBUF];
-
-			GetSystemMenu(hWnd, TRUE);		// èâä˙âª
-			hTargetMenu = GetSystemMenu(hWnd, FALSE);
-			DeleteMenu(hTargetMenu, SC_MAXIMIZE, MF_BYCOMMAND);
-			DeleteMenu(hTargetMenu, SC_MINIMIZE, MF_BYCOMMAND);
-			DeleteMenu(hTargetMenu, SC_SIZE, MF_BYCOMMAND);
-			DeleteMenu(hTargetMenu, SC_TASKLIST, MF_BYCOMMAND);
-
-			HMENU	hMainMenu	= LoadMenu(TApp::hI, (LPCSTR)MAIN_MENU);
-			HMENU	hSubMenu	= GetSubMenu(hMainMenu, 0);
-			int		maxItem = GetMenuItemCount(hSubMenu);
-			for (int cnt=0; cnt < maxItem -2; cnt++)
-			{
-				if (GetMenuString(hSubMenu, cnt, buf, sizeof(buf), MF_BYPOSITION) > 0)
-					::AppendMenu(hTargetMenu, MF_STRING, GetMenuItemID(hSubMenu, cnt), buf);
-				else
-					::AppendMenu(hTargetMenu, MF_SEPARATOR, NULL, NULL);
-			}
-			AddAbsenceMenu(hTargetMenu, 0);
-			DestroyMenu(hMainMenu);
-		}
 		return	TRUE;
 	}
 	return	FALSE;
@@ -464,30 +518,28 @@ BOOL TMainWin::AddAbsenceMenu(HMENU hTargetMenu, int insertOffset)
 	HMENU	hSubMenu = ::CreateMenu();
 	UINT	index = ::GetMenuItemCount(hTargetMenu) - insertOffset;
 
-	if (hSubMenu == NULL)
-		return	FALSE;
+	if (hSubMenu == NULL) return FALSE;
 
-	for (int cnt=cfg->AbsenceMax -1; cnt >= 0; cnt--)
-		::AppendMenu(hSubMenu, MF_STRING, MENU_ABSENCE_START + cnt, cfg->AbsenceHead[cnt]);
-	::AppendMenu(hSubMenu, MF_SEPARATOR, 0, 0);
-	::AppendMenu(hSubMenu, MF_STRING, MENU_ABSENCEEX, ABSENCESET_MSGSTR);
-	::InsertMenu(hTargetMenu, index++, MF_BYPOSITION|MF_POPUP, (UINT)hSubMenu, ABSENCEMENU_MSGSTR);
+	for (int cnt=cfg->AbsenceMax -1; cnt >= 0; cnt--) {
+		AppendMenuU8(hSubMenu, MF_STRING, MENU_ABSENCE_START + cnt, cfg->AbsenceHead[cnt]);
+	}
+	AppendMenuU8(hSubMenu, MF_SEPARATOR, 0, 0);
+	AppendMenuU8(hSubMenu, MF_STRING, MENU_ABSENCEEX, GetLoadStrU8(IDS_ABSENCESET));
+	InsertMenuU8(hTargetMenu, index++, MF_BYPOSITION|MF_POPUP, (UINT)hSubMenu, GetLoadStrU8(IDS_ABSENCEMENU));
 
-	if (cfg->AbsenceCheck)
-	{
-		wsprintf(buf, "%s(%s)", ABSENCELIFT_MSGSTR, cfg->AbsenceHead[cfg->AbsenceChoice]);
-		::InsertMenu(hTargetMenu, index, MF_BYPOSITION|MF_STRING, MENU_ABSENCE, buf);
+	if (cfg->AbsenceCheck) {
+		wsprintf(buf, "%s(%s)", GetLoadStrU8(IDS_ABSENCELIFT), cfg->AbsenceHead[cfg->AbsenceChoice]);
+		InsertMenuU8(hTargetMenu, index, MF_BYPOSITION|MF_STRING, MENU_ABSENCE, buf);
 	}
 	return	TRUE;
 }
 
 /*
-	UseríËã` Event CallBack
+	AppÂÆöÁæ© Event CallBack
 */
-BOOL TMainWin::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
+BOOL TMainWin::EventApp(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	switch (uMsg)
-	{
+	switch (uMsg) {
 	case WM_SENDDLG_OPEN:
 		SendDlgOpen((HWND)wParam, (MsgBuf *)lParam);
 		return	TRUE;
@@ -500,6 +552,13 @@ BOOL TMainWin::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
 		SendDlgHide((TSendDlg *)lParam);
 		return	TRUE;
 
+	case WM_SENDDLG_FONTCHANGED:
+		if (histDlg->hWnd) {
+			histDlg->SetFont();
+			::InvalidateRect(histDlg->hWnd, NULL, TRUE);
+		}
+		return	TRUE;
+
 	case WM_RECVDLG_OPEN:
 		PopupCheck();
 		return	TRUE;
@@ -508,7 +567,28 @@ BOOL TMainWin::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
 		RecvDlgExit((TRecvDlg *)lParam);
 		return	TRUE;
 
-	case WM_IPMSG_NOTIFY:	// TaskTray
+	case WM_NOTIFY_TRAY:		// TaskTray
+		switch (lParam) {
+		case NIN_BALLOONHIDE:
+			return	TRUE;
+
+		case NIN_BALLOONTIMEOUT:
+			trayMode = TRAY_NORMAL;
+			return	TRUE;
+
+		case NIN_BALLOONSHOW:
+			return	TRUE;
+
+		case NIN_BALLOONUSERCLICK:
+			if (trayMode != TRAY_OPENMSG) {
+				SendMessage(WM_RECVDLG_OPEN, 0, 0);
+			}
+			trayMode = TRAY_NORMAL;
+			return	TRUE;
+
+		default:
+			break;
+		}
 		PostMessage((UINT)lParam, 0, 0);
 		return	TRUE;
 
@@ -517,7 +597,8 @@ BOOL TMainWin::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
 		return	TRUE;
 
 	case WM_UDPEVENT:
-		UdpEvent(lParam);
+		while (UdpEvent(lParam))
+			;
 		return	TRUE;
 
 	case WM_TCPEVENT:
@@ -533,18 +614,112 @@ BOOL TMainWin::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
 		return	TRUE;
 
 	case WM_DELMISCDLG:
-		EvCommand(0, MENU_DELMISCDLG, 0);
+		if (msgList.TopObj()) {
+			DeleteListDlg(&msgList);
+		}
 		return	TRUE;
 
 	case WM_IPMSG_INITICON:
 		InitIcon();
-		SetIcon(cfg->AbsenceCheck == FALSE ? hMainIcon : hRevIcon);
+		SetIcon(cfg->AbsenceCheck ? hRevIcon : hMainIcon);
 		return	TRUE;
 
-	default:
-		if (uMsg == TaskBarCreateMsg)
-		{
-			TaskBar(NIM_ADD, hMainIcon, IPMSG_MSGSTR);
+// refreshÊôÇ„Å´Êõ¥Êñ∞„Åô„Çå„Å∞ÂçÅÂàÜ
+//	case WM_IPMSG_BRRESET:
+//		MakeBrListEx();
+//		return	TRUE;
+
+	case WM_HISTDLG_OPEN:
+		if (wParam == 1) histDlg->SetMode(TRUE);
+		MiscDlgOpen(histDlg);
+		return	TRUE;
+
+	case WM_HISTDLG_HIDE:
+		histDlg->Show(SW_HIDE);
+		return	TRUE;
+
+	case WM_HISTDLG_NOTIFY:
+		histDlg->SendNotify((HostSub *)wParam, (ULONG)lParam);
+		SetCaption();
+		return	TRUE;
+
+	case WM_FORCE_TERMINATE:
+		TaskTray(NIM_DELETE);
+		::ExitProcess(0xffffffff);
+		return	TRUE;
+
+	case WM_IPMSG_IMECTRL:
+		ControlIME((TWin *)lParam, (BOOL)wParam);
+		return	TRUE;
+
+	case WM_IPMSG_BRNOTIFY:
+		if (lParam == IPMSG_DEFAULT_PORT) {
+			BroadcastEntry(IPMSG_BR_ABSENCE); 
+		}
+		return	TRUE;
+	}
+	return	FALSE;
+}
+
+BOOL TMainWin::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	if (uMsg == TaskBarCreateMsg) {
+		TaskTray(NIM_ADD, hMainIcon, IP_MSG);
+		SetCaption();
+		return	TRUE;
+	}
+	else if (uMsg == TaskBarButtonMsg) {
+//		Debug("TaskBarButtonMsg wParam=%x lParam=%d\n", wParam, lParam);
+		return	TRUE;
+	}
+	else if (uMsg == TaskBarNotifyMsg) {
+		Popup(MAIN_MENU);
+		return	TRUE;
+	}
+	return	FALSE;
+}
+
+/*
+	ÂèÇÂä† Message PacketÈÄÅÂá∫
+*/
+void TMainWin::EntryHost(void)
+{
+	Time_t	now_time = Time();
+
+	if (entryStartTime + (Time_t)cfg->ListGetMSec / 1000 > now_time) return;
+
+	entryStartTime = now_time;
+
+	if (cfg->ListGet) {
+		if (::SetTimer(hWnd, IPMSG_LISTGET_TIMER, cfg->ListGetMSec, NULL)) {
+			entryTimerStatus = IPMSG_LISTGET_TIMER;
+		}
+		BroadcastEntry(IPMSG_BR_ISGETLIST2);
+	}
+	else {
+		BroadcastEntry(IPMSG_BR_ENTRY);
+	}
+}
+
+/*
+	ËÑ±Âá∫ Message PacketÈÄÅÂá∫
+*/
+void TMainWin::ExitHost(void)
+{
+	BroadcastEntry(IPMSG_BR_EXIT);
+	this->Sleep(100);
+	BroadcastEntry(IPMSG_BR_EXIT);
+}
+
+/*
+	ÈáçË§á PacketË™øÊüªÔºàÁ∞°Êòì...„ÇÇ„Åó„Åè„ÅØÊâãÊäú„Åç„Å®„ÇÇË®Ä„ÅÜ(^^;Ôºâ
+*/				
+BOOL TMainWin::IsLastPacket(MsgBuf *msg)
+{
+	for (int cnt=0; cnt < MAX_PACKETLOG; cnt++) {
+		if (packetLog[cnt].addr == msg->hostSub.addr &&
+			packetLog[cnt].port == msg->hostSub.portNo &&
+			packetLog[cnt].no == msg->packetNo) {
 			return	TRUE;
 		}
 	}
@@ -552,74 +727,30 @@ BOOL TMainWin::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
 }
 
 /*
-	éQâ¡ Message Packetëóèo
-*/
-void TMainWin::EntryHost(void)
-{
-	time_t	now_time = Time();
-
-	if (entryStartTime + (time_t)cfg->ListGetMSec / 1000 > now_time)
-		return;
-	entryStartTime = now_time;
-
-	if (cfg->ListGet)
-	{
-		if (::SetTimer(hWnd, IPMSG_LISTGET_TIMER, cfg->ListGetMSec, NULL))
-			entryTimerStatus = IPMSG_LISTGET_TIMER;
-		BroadcastEntry(IPMSG_BR_ISGETLIST2);
-	}
-	else
-		BroadcastEntry(IPMSG_BR_ENTRY);
-}
-
-/*
-	íEèo Message Packetëóèo
-*/
-void TMainWin::ExitHost(void)
-{
-	BroadcastEntry(IPMSG_BR_EXIT);
-	Sleep(100);
-	BroadcastEntry(IPMSG_BR_EXIT);
-}
-
-/*
-	èdï° Packetí≤ç∏Åiä»à’...Ç‡ÇµÇ≠ÇÕéËî≤Ç´Ç∆Ç‡åæÇ§(^^;Åj
-*/				
-BOOL TMainWin::IsLastPacket(MsgBuf *msg)
-{
-	for (int cnt=0; cnt < MAX_PACKETLOG; cnt++)
-	{
-		if (packetLog[cnt].addr == msg->hostSub.addr && packetLog[cnt].port == msg->hostSub.portNo && packetLog[cnt].no == msg->packetNo && msg->packetNo != IPMSG_DEFAULT_PORT)
-		return	TRUE;
-	}
-	return	FALSE;
-}
-
-/*
-	UDP Packet éÛêMèàóù
+	UDP Packet Âèó‰ø°Âá¶ÁêÜ
 */
 BOOL TMainWin::UdpEvent(LPARAM lParam)
 {
 	MsgBuf	msg;
 
-	if (WSAGETSELECTERROR(lParam) || msgMng->Recv(&msg) != TRUE)
-		return	FALSE;
+	if (WSAGETSELECTERROR(lParam) || !msgMng->Recv(&msg)) return	FALSE;
 
-	if (cfg->PriorityReject)
-	{
+	if (cfg->PriorityReject) {
 		Host *host = cfg->priorityHosts.GetHostByName(&msg.hostSub);
-		if (host && (host->priority < 0 || cfg->PriorityReject >= 2 && host->priority == 0) && IsSameHost(&msg.hostSub, msgMng->GetLocalHost()) == FALSE)
-		{
+		if (host && (host->priority < 0 || cfg->PriorityReject >= 2 && host->priority == 0) &&
+			!IsSameHost(&msg.hostSub, msgMng->GetLocalHost())) {
 			ULONG	cmd = GET_MODE(msg.command);
-			if (cmd != IPMSG_BR_EXIT && cmd != IPMSG_NOOPERATION)
+
+			if (cmd != IPMSG_BR_EXIT && cmd != IPMSG_NOOPERATION) {
 				BroadcastEntrySub(&msg.hostSub, IPMSG_BR_EXIT);
-			if (GET_MODE(msg.command) != IPMSG_ANSENTRY)
-				return	FALSE;
+			}
+			if (GET_MODE(msg.command) != IPMSG_ANSENTRY) {
+				return	TRUE;
+			}
 		}
 	}
 
-	switch (GET_MODE(msg.command))
-	{
+	switch (GET_MODE(msg.command)) {
 	case IPMSG_BR_ENTRY:
 		MsgBrEntry(&msg);
 		return	TRUE;
@@ -703,13 +834,15 @@ BOOL TMainWin::UdpEvent(LPARAM lParam)
 }
 
 /*
-	TCP Packet éÛêMèàóù
+	TCP Packet Âèó‰ø°Âá¶ÁêÜ
 */
 inline SendFileObj *TMainWin::FindSendFileObj(SOCKET sd)
 {
-	for (SendFileObj *obj = (SendFileObj *)sendFileList.TopObj(); obj; obj = (SendFileObj *)sendFileList.NextObj(obj))
-		if (obj->conInfo->sd == sd)
+	for (SendFileObj *obj = (SendFileObj *)sendFileList.TopObj(); obj; obj = (SendFileObj *)sendFileList.NextObj(obj)) {
+		if (obj->conInfo->sd == sd) {
 			return	obj;
+		}
+	}
 	return	NULL;
 }
 
@@ -722,14 +855,14 @@ BOOL TMainWin::TcpEvent(SOCKET sd, LPARAM lParam)
 	case FD_ACCEPT:
 		{
 			ConnectInfo	tmpInfo, *info;
-			if (msgMng->Accept(hWnd, &tmpInfo))
-			{
-				if (CheckConnectInfo(&tmpInfo))
-				{
+			if (msgMng->Accept(hWnd, &tmpInfo)) {
+				if (CheckConnectInfo(&tmpInfo)) {
 					info = new ConnectInfo(tmpInfo);
 					connectList.AddObj(info);
 				}
-				else ::closesocket(tmpInfo.sd);
+				else {
+					::Tclosesocket(tmpInfo.sd);
+				}
 			}
 		}
 		break;
@@ -741,10 +874,12 @@ BOOL TMainWin::TcpEvent(SOCKET sd, LPARAM lParam)
 	case FD_CLOSE:
 		{
 			SendFileObj *obj;
-			if ((obj = FindSendFileObj(sd)) != NULL)
+			if ((obj = FindSendFileObj(sd))) {
 				EndSendFile(obj);
-			else
-				::closesocket(sd);
+			}
+			else {
+				::Tclosesocket(sd);
+			}
 		}
 		break;
 	}
@@ -753,17 +888,18 @@ BOOL TMainWin::TcpEvent(SOCKET sd, LPARAM lParam)
 
 BOOL TMainWin::CheckConnectInfo(ConnectInfo *conInfo)
 {
-	for (ShareInfo *info=shareMng->Top(); info; info=shareMng->Next(info))
-	{
-		for (int cnt=0; cnt < info->hostCnt; cnt++)
-			if (info->host[cnt]->hostSub.addr == conInfo->addr/* && info->host[cnt]->hostSub.portNo == conInfo->port*/)
+	for (ShareInfo *info=shareMng->Top(); info; info=shareMng->Next(info)) {
+		for (int cnt=0; cnt < info->hostCnt; cnt++) {
+			if (info->host[cnt]->hostSub.addr == conInfo->addr/* && info->host[cnt]->hostSub.portNo == conInfo->port*/) {
 				return	conInfo->port = info->host[cnt]->hostSub.portNo, TRUE;
+			}
+		}
 	}
 	return	FALSE;
 }
 
 /*
-	ÉtÉ@ÉCÉãëóéÛêMäJénèàóù
+	„Éï„Ç°„Ç§„É´ÈÄÅÂèó‰ø°ÈñãÂßãÂá¶ÁêÜ
 */
 BOOL TMainWin::StartSendFile(SOCKET sd)
 {
@@ -772,21 +908,23 @@ BOOL TMainWin::StartSendFile(SOCKET sd)
 
 	for (conInfo=(ConnectInfo *)connectList.TopObj(); conInfo && conInfo->sd != sd; conInfo=(ConnectInfo *)connectList.NextObj(conInfo))
 		;
-	if (conInfo == NULL)
-		return	::closesocket(sd), FALSE;
-	else {
-		msgMng->ConnectDone(hWnd, conInfo);	// îÒìØä˙ÉÅÉbÉZÅ[ÉWÇÃó}êß
 
-// Ç∑Ç≈Ç… read óvãÅÇ™Ç´ÇƒÇ¢ÇÈÇÃÇ≈ÅAå≈Ç‹ÇÈéñÇÕñ≥Ç¢...ÇÕÇ∏
-// àÍìxÇÃ recv Ç≈ì«ÇﬂÇ»Ç¢èÍçáÅAÉGÉâÅ[Ç…ÇµÇƒÇµÇ‹Ç§ÅiéËî≤Ç´Åj
-		char	buf[MAX_PATH];
+	if (conInfo == NULL) {
+		return	::Tclosesocket(sd), FALSE;
+	} else {
+		msgMng->ConnectDone(hWnd, conInfo);	// ÈùûÂêåÊúü„É°„ÉÉ„Çª„Éº„Ç∏„ÅÆÊäëÂà∂
+
+		// „Åô„Åß„Å´ read Ë¶ÅÊ±Ç„Åå„Åç„Å¶„ÅÑ„Çã„ÅÆ„Åß„ÄÅÂõ∫„Åæ„Çã‰∫ã„ÅØÁÑ°„ÅÑ...„ÅØ„Åö
+		// ‰∏ÄÂ∫¶„ÅÆ recv „ÅßË™≠„ÇÅ„Å™„ÅÑÂ†¥Âêà„ÄÅ„Ç®„É©„Éº„Å´„Åó„Å¶„Åó„Åæ„ÅÜÔºàÊâãÊäú„ÅçÔºâ
+		char	buf[MAX_PATH_U8];
 		int		size;
-		if ((size = ::recv(conInfo->sd, buf, sizeof(buf) -1, 0)) > 0)
+
+		if ((size = ::Trecv(conInfo->sd, buf, sizeof(buf) -1, 0)) > 0) {
 			buf[size] = 0;
-		if (size <= 0 || shareMng->GetAcceptableFileInfo(conInfo, buf, &fileInfo) == FALSE)
-		{
+		}
+		if (size <= 0 || !shareMng->GetAcceptableFileInfo(conInfo, buf, &fileInfo)) {
 			connectList.DelObj(conInfo);
-			::closesocket(conInfo->sd);
+			::Tclosesocket(conInfo->sd);
 			delete conInfo;
 			return	FALSE;
 		}
@@ -800,43 +938,57 @@ BOOL TMainWin::StartSendFile(SOCKET sd)
 	obj->offset = fileInfo.offset;
 	obj->packetNo = fileInfo.packetNo;
 	obj->host = fileInfo.host;
-	obj->command = GET_MODE(fileInfo.command);
+	obj->command = fileInfo.command;
 	obj->conInfo->startTick = obj->conInfo->lastTick = ::GetTickCount();
 	obj->attachTime = fileInfo.attachTime;
 	connectList.DelObj(conInfo);
 	sendFileList.AddObj(obj);
 
-	if (GetFileInfomation(obj->fileInfo->Fname(), &obj->fdata) == FALSE)
-		return	EndSendFile(obj), FALSE;
+	BOOL	ret = FALSE;
 
-	obj->isDir = (obj->fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? TRUE : FALSE;
-	obj->status = obj->isDir || obj->command == IPMSG_GETDIRFILES ? FS_DIRFILESTART : FS_TRANSFILE;
-
-	if (*obj->fdata.cFileName == 0)
-		ForcePathToFname(obj->fileInfo->Fname(), obj->fdata.cFileName);
-
-	BOOL	ret;
-	if (obj->isDir)
-	{
-		ret = obj->command == IPMSG_GETDIRFILES ? TRUE : FALSE;
-		obj->hDir = (HANDLE *)malloc((MAX_PATH/2) * sizeof(HANDLE));
+	if (obj->fileInfo->MemData()) {
+		obj->isDir	= FALSE;
+		obj->status	= FS_MEMFILESTART;
+		ret = TRUE;
 	}
 	else {
-		if ((cfg->fileTransOpt & FT_STRICTDATE) && *(_int64 *)&obj->fdata.ftLastWriteTime > *(_int64 *)&obj->attachTime)
-			ret = FALSE, obj->status = FS_COMPLETE;		// ã§óLèÓïÒÇ©ÇÁè¡ãé
-		else if (obj->command == IPMSG_GETDIRFILES)
-			ret = TRUE;
-		else
-			ret = OpenSendFile(obj->fileInfo->Fname(), obj);
-	}
-	if (ret == FALSE)
-		return	EndSendFile(obj), FALSE;
+		if (!GetFileInfomationU8(obj->fileInfo->Fname(), &obj->fdata)) {
+			return	EndSendFile(obj), FALSE;
+		}
+		obj->isDir = (obj->fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? TRUE : FALSE;
+		obj->status = obj->isDir || GET_MODE(obj->command) == IPMSG_GETDIRFILES ? FS_DIRFILESTART : FS_TRANSFILE;
 
-	DWORD	id;	// égÇÌÇ∏Åi95ånÇ≈ error Ç…Ç»ÇÈÇÃÇñhÇÆÇæÇØÅj
-	obj->hThread = (HANDLE)~0;	// î˜ñ≠Ç»óÃàÊÇîÇØÇÈ
-	// thread ì‡Ç≈ÇÕ MT ëŒâûÇ™ïKóvÇ» crt ÇÕégÇÌÇ∏
-	if ((obj->hThread = ::CreateThread(NULL, 0, SendFileThread, obj, 0, &id)) == NULL)
+		if (*obj->fdata.cFileName == 0) {
+			ForcePathToFname(obj->fileInfo->Fname(), obj->fdata.cFileName);
+		}
+
+		if (obj->isDir) {
+			ret = GET_MODE(obj->command) == IPMSG_GETDIRFILES ? TRUE : FALSE;
+			obj->hDir = (HANDLE *)malloc((MAX_PATH_U8/2) * sizeof(HANDLE));
+		}
+		else {
+			if ((cfg->fileTransOpt & FT_STRICTDATE) && *(_int64 *)&obj->fdata.ftLastWriteTime > *(_int64 *)&obj->attachTime) {
+				ret = FALSE, obj->status = FS_COMPLETE;		// ÂÖ±ÊúâÊÉÖÂ†±„Åã„ÇâÊ∂àÂéª
+			}
+			else if (GET_MODE(obj->command) == IPMSG_GETDIRFILES) {
+				ret = TRUE;
+			}
+			else {
+				ret = OpenSendFile(obj->fileInfo->Fname(), obj);
+			}
+		}
+	}
+	if (!ret) {
+		EndSendFile(obj);
+		return FALSE;
+	}
+
+	DWORD	id;	// ‰Ωø„Çè„ÅöÔºà95Á≥ª„Åß error „Å´„Å™„Çã„ÅÆ„ÇíÈò≤„Åê„Å†„ÅëÔºâ
+	obj->hThread = (HANDLE)~0;	// ÂæÆÂ¶ô„Å™È†òÂüü„ÇíÈÅø„Åë„Çã
+	// thread ÂÜÖ„Åß„ÅØ MT ÂØæÂøú„ÅåÂøÖË¶Å„Å™ crt „ÅØ‰Ωø„Çè„Åö
+	if ((obj->hThread = ::CreateThread(NULL, 0, SendFileThread, obj, 0, &id)) == NULL) {
 		return	EndSendFile(obj), FALSE;
+	}
 
 	return	TRUE;
 }
@@ -845,18 +997,19 @@ BOOL TMainWin::OpenSendFile(const char *fname, SendFileObj *obj)
 {
 	DWORD	lowSize, highSize, viewSize;
 
-	if ((obj->hFile = ::CreateFile(fname, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0)) != INVALID_HANDLE_VALUE)
-	{
+	if ((obj->hFile = CreateFileU8(fname, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0)) != INVALID_HANDLE_VALUE) {
+
 		lowSize = ::GetFileSize(obj->hFile, &highSize);
-		if ((obj->fileSize = (_int64)highSize << 32 | lowSize) == 0)
+		if ((obj->fileSize = (_int64)highSize << 32 | lowSize) == 0) {
 			return	TRUE;
+		}
 		obj->hMap = ::CreateFileMapping(obj->hFile, 0, PAGE_READONLY, highSize, lowSize, 0);
 		viewSize = (int)(obj->fileSize > cfg->ViewMax ? cfg->ViewMax : obj->fileSize);
 		highSize = (int)(obj->offset >> 32);
 		lowSize = (int)((obj->offset / cfg->ViewMax) * cfg->ViewMax);
 		obj->mapAddr = (char *)::MapViewOfFile(obj->hMap, FILE_MAP_READ, highSize, lowSize, viewSize);
-		if (obj->mapAddr && IsBadReadPtr(obj->mapAddr, 1))
-		{
+
+		if (obj->mapAddr && ::IsBadReadPtr(obj->mapAddr, 1)) {
 			CloseSendFile(obj);
 			return	FALSE;
 		}
@@ -866,8 +1019,7 @@ BOOL TMainWin::OpenSendFile(const char *fname, SendFileObj *obj)
 
 BOOL TMainWin::CloseSendFile(SendFileObj *obj)
 {
-	if (obj == NULL)
-		return	FALSE;
+	if (obj == NULL) return	FALSE;
 
 	::UnmapViewOfFile(obj->mapAddr);obj->mapAddr= NULL;
 	::CloseHandle(obj->hMap);		obj->hMap	= NULL;
@@ -885,33 +1037,36 @@ DWORD WINAPI TMainWin::SendFileThread(void *_sendFileObj)
 	timeval		tv;
 	int			sock_ret;
 	BOOL		ret = FALSE, completeWait = FALSE;
-	BOOL		(TMainWin::*SendFileFunc)(SendFileObj *obj) =
-				obj->command == IPMSG_GETDIRFILES ? TMainWin::SendDirFile : TMainWin::SendFile;
+	BOOL		(TMainWin::*SendFileFunc)(SendFileObj*) =
+				obj->status == FS_MEMFILESTART ? &TMainWin::SendMemFile :
+				GET_MODE(obj->command) == IPMSG_GETDIRFILES ? &TMainWin::SendDirFile : &TMainWin::SendFile;
 
 	FD_ZERO(&fds);
 	FD_SET(obj->conInfo->sd, &fds);
 
-	for (int waitCnt=0; waitCnt < 180 && obj->hThread != NULL; waitCnt++)
-	{
+	for (int waitCnt=0; waitCnt < 180 && obj->hThread; waitCnt++) {
 		tv.tv_sec = 1, tv.tv_usec = 0;
 
-		if ((sock_ret = ::select(obj->conInfo->sd + 1, rfds, wfds, NULL, &tv)) > 0)
-		{
+		if ((sock_ret = ::Tselect((int)obj->conInfo->sd + 1, rfds, wfds, NULL, &tv)) > 0) {
 			waitCnt = 0;
 
-			if (completeWait)
-			{	// dummy read Ç…ÇÊÇËÅAëäéËë§ÇÃ socket ÉNÉçÅ[ÉYÇ…ÇÊÇÈ EOF Çåüèo
-				if (::recv(obj->conInfo->sd, (char *)&ret, sizeof(ret), 0) >= 0)
+			if (completeWait) {
+				// dummy read „Å´„Çà„Çä„ÄÅÁõ∏ÊâãÂÅ¥„ÅÆ socket „ÇØ„É≠„Éº„Ç∫„Å´„Çà„Çã EOF „ÇíÊ§úÂá∫
+				if (::Trecv(obj->conInfo->sd, (char *)&ret, sizeof(ret), 0) >= 0) {
 					ret = TRUE;
+				}
 				break;
 			}
-			else if ((mainWin->*SendFileFunc)(obj) != TRUE)
+			else if (!(mainWin->*SendFileFunc)(obj)) {
 				break;
-			else if (obj->status == FS_COMPLETE)
-			{
+			}
+			else if (obj->status == FS_COMPLETE) {
 				completeWait = TRUE, rfds = &fds, wfds = NULL;
-				// âﬂãéÉ¿7à»ëOÇÃå›ä∑ê´ÇÃÇΩÇﬂ
-				if (obj->fileSize == 0) { ret = TRUE; break; }
+				// ÈÅéÂéªŒ≤7‰ª•Ââç„ÅÆ‰∫íÊèõÊÄß„ÅÆ„Åü„ÇÅ
+				if (obj->fileSize == 0) {
+					ret = TRUE;
+					break;
+				}
 			}
 		}
 		else if (sock_ret == 0) {
@@ -923,8 +1078,7 @@ DWORD WINAPI TMainWin::SendFileThread(void *_sendFileObj)
 		}
 	}
 
-	if (obj->isDir)
-	{
+	if (obj->isDir) {
 		mainWin->CloseSendFile(obj);
 		while (--obj->dirCnt >= 0)
 			::FindClose(obj->hDir[obj->dirCnt]);
@@ -938,27 +1092,40 @@ DWORD WINAPI TMainWin::SendFileThread(void *_sendFileObj)
 
 int MakeDirHeader(SendFileObj *obj, BOOL find)
 {
-	int				len;
-	WIN32_FIND_DATA	*dat = &obj->fdata;
-	DWORD			attr = dat->dwFileAttributes, ipmsg_attr;
+	int					len;
+	WIN32_FIND_DATA_U8	*dat = &obj->fdata;
+	DWORD				attr = dat->dwFileAttributes, ipmsg_attr;
+	char				cFileName[MAX_PATH_U8];
+	WCHAR				wbuf[MAX_PATH];
 
-	ipmsg_attr = (find == FALSE ? IPMSG_FILE_RETPARENT : (attr & FILE_ATTRIBUTE_DIRECTORY)
+	if (obj->command & IPMSG_UTF8OPT) {
+		strncpyz(cFileName, dat->cFileName, MAX_PATH_U8);
+	}
+	else {
+		U8toW(dat->cFileName, wbuf, MAX_PATH);
+		WtoA(wbuf, cFileName, MAX_PATH_U8);
+	}
+
+	ipmsg_attr = (!find ? IPMSG_FILE_RETPARENT : (attr & FILE_ATTRIBUTE_DIRECTORY)
 			? IPMSG_FILE_DIR : IPMSG_FILE_REGULAR) |
 		(attr & FILE_ATTRIBUTE_READONLY ? IPMSG_FILE_RONLYOPT : 0) |
 		(attr & FILE_ATTRIBUTE_HIDDEN ? IPMSG_FILE_HIDDENOPT : 0) |
 		(attr & FILE_ATTRIBUTE_SYSTEM ? IPMSG_FILE_SYSTEMOPT : 0);
 
-	if (find)
-		len = wsprintf(obj->header, "0000:%s:%x%08x:%x:%x=%x:%x=%x:", dat->cFileName,
+	if (find) {
+		len = wsprintf(obj->header, "0000:%s:%x%08x:%x:%x=%x:%x=%x:", cFileName,
 				dat->nFileSizeHigh, dat->nFileSizeLow, ipmsg_attr,
 				IPMSG_FILE_MTIME, FileTime2UnixTime(&dat->ftLastWriteTime),
 				IPMSG_FILE_CREATETIME, FileTime2UnixTime(&dat->ftCreationTime));
-	else if (*(_int64 *)&dat->ftLastWriteTime)
+	}
+	else if (*(_int64 *)&dat->ftLastWriteTime) {
 		len = wsprintf(obj->header, "0000:.:0:%x:%x=%x:%x=%x:", ipmsg_attr,
 				IPMSG_FILE_MTIME, FileTime2UnixTime(&dat->ftLastWriteTime),
 				IPMSG_FILE_CREATETIME, FileTime2UnixTime(&dat->ftCreationTime));
-	else
+	}
+	else {
 		len = wsprintf(obj->header, "0000:.:0:%x:", ipmsg_attr);
+	}
 
 	obj->header[wsprintf(obj->header, "%04x", len)] = ':';
 
@@ -966,95 +1133,92 @@ int MakeDirHeader(SendFileObj *obj, BOOL find)
 }
 
 /*
-	ÉtÉ@ÉCÉãëóéÛêM
+	„Éï„Ç°„Ç§„É´ÈÄÅÂèó‰ø°
 */
 BOOL TMainWin::SendDirFile(SendFileObj *obj)
 {
 	BOOL	find = FALSE;
 
-	if (obj->status == FS_OPENINFO)
-	{
+	if (obj->status == FS_OPENINFO) {
 		char	buf[MAX_BUF];
-		if (obj->dirCnt == 0)
-			strncpyz(buf, obj->fileInfo->Fname(), MAX_PATH);
-		else if (MakePath(buf, obj->path, *obj->fdata.cAlternateFileName ? obj->fdata.cAlternateFileName : obj->fdata.cFileName) >= MAX_PATH)
+		if (obj->dirCnt == 0) {
+			strncpyz(buf, obj->fileInfo->Fname(), MAX_PATH_U8);
+		}
+		else if (MakePath(buf, obj->path, *obj->fdata.cAlternateFileName ? obj->fdata.cAlternateFileName : obj->fdata.cFileName) >= MAX_PATH_U8) {
 			return	FALSE;
-		strncpyz(obj->path, buf, MAX_PATH);
+		}
+		strncpyz(obj->path, buf, MAX_PATH_U8);
 		obj->dirCnt++;
 		obj->status = FS_FIRSTINFO;
 	}
 
-	if (obj->status == FS_FIRSTINFO || obj->status == FS_NEXTINFO)
-	{
-		if (obj->status == FS_FIRSTINFO)
-		{
+	if (obj->status == FS_FIRSTINFO || obj->status == FS_NEXTINFO) {
+		if (obj->status == FS_FIRSTINFO) {
 			char	buf[MAX_BUF];
 			MakePath(buf, obj->path, "*");
-			find = (obj->hDir[obj->dirCnt -1] = ::FindFirstFile(buf, &obj->fdata)) == INVALID_HANDLE_VALUE ? FALSE : TRUE;
+			find = (obj->hDir[obj->dirCnt -1] = FindFirstFileU8(buf, &obj->fdata)) == INVALID_HANDLE_VALUE ? FALSE : TRUE;
 		}
-		else find = ::FindNextFile(obj->hDir[obj->dirCnt -1], &obj->fdata);
+		else {
+			find = FindNextFileU8(obj->hDir[obj->dirCnt -1], &obj->fdata);
+		}
 
-		while (find && (strcmp(obj->fdata.cFileName, ".") == 0 || strcmp(obj->fdata.cFileName, "..") == 0))
-			find = ::FindNextFile(obj->hDir[obj->dirCnt -1], &obj->fdata);
+		while (find && (strcmp(obj->fdata.cFileName, ".") == 0 || strcmp(obj->fdata.cFileName, "..") == 0)) {
+			find = FindNextFileU8(obj->hDir[obj->dirCnt -1], &obj->fdata);
+		}
 		obj->status = FS_MAKEINFO;
 	}
 
-	if (obj->status == FS_DIRFILESTART || obj->status == FS_MAKEINFO)
-	{
-		if (obj->status == FS_DIRFILESTART)
+	if (obj->status == FS_DIRFILESTART || obj->status == FS_MAKEINFO) {
+		if (obj->status == FS_DIRFILESTART) {
 			find = TRUE;
-		if (find && (obj->dirCnt > 0 || obj->isDir == FALSE) && (obj->fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
-		{
+		}
+		if (find && (obj->dirCnt > 0 || !obj->isDir) && (obj->fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
 			char	buf[MAX_BUF];
 			int		len = obj->isDir ? MakePath(buf, obj->path, *obj->fdata.cAlternateFileName ? obj->fdata.cAlternateFileName : obj->fdata.cFileName) : wsprintf(buf, "%s", obj->fileInfo->Fname());
 			BOOL	modifyCheck = (cfg->fileTransOpt & FT_STRICTDATE) && *(_int64 *)&obj->fdata.ftLastWriteTime > *(_int64 *)&obj->attachTime;
-			if (len >= MAX_PATH || modifyCheck || OpenSendFile(buf, obj) == FALSE)
-			{
-				len = strlen(obj->fdata.cFileName);
-				strncpyz(obj->fdata.cFileName + len, " (Can't open)", MAX_PATH - len);
+
+			if (len >= MAX_PATH_U8 || modifyCheck || !OpenSendFile(buf, obj)) {
+				len = (int)strlen(obj->fdata.cFileName);
+				strncpyz(obj->fdata.cFileName + len, " (Can't open)", MAX_PATH_U8 - len);
 				obj->fdata.nFileSizeHigh = obj->fdata.nFileSizeLow = 0;
 			}
 		}
-		if (find == FALSE && obj->isDir)
-			GetFileInfomation(obj->path, &obj->fdata);
+		if (!find && obj->isDir)
+			GetFileInfomationU8(obj->path, &obj->fdata);
 
 		obj->headerOffset = 0;
 		obj->headerLen = MakeDirHeader(obj, find);
-		if (find == FALSE)
-		{
-			if (--obj->dirCnt >= 0 && obj->isDir)
-			{
+		if (!find) {
+			if (--obj->dirCnt >= 0 && obj->isDir) {
 				::FindClose(obj->hDir[obj->dirCnt]);
-				if (PathToDir(obj->path, obj->path) != TRUE && obj->dirCnt > 0)
+				if (!PathToDir(obj->path, obj->path) && obj->dirCnt > 0) {
 					return	FALSE;
+				}
 			}
-			if (obj->dirCnt <= 0)
-				obj->dirCnt--;	// èIóπ
+			if (obj->dirCnt <= 0) obj->dirCnt--;	// ÁµÇ‰∫Ü
 		}
 		obj->status = FS_TRANSINFO;
 	}
 
-	if (obj->status == FS_TRANSINFO)
-	{
-		int	size = ::send(obj->conInfo->sd, obj->header + obj->headerOffset, obj->headerLen - obj->headerOffset, 0);
-		if (size < 0)
+	if (obj->status == FS_TRANSINFO) {
+		int	size = ::Tsend(obj->conInfo->sd, obj->header + obj->headerOffset, obj->headerLen - obj->headerOffset, 0);
+		if (size < 0) {
 			return	FALSE;
+		}
 		else {
-			if ((obj->headerOffset += size) < obj->headerLen)
+			if ((obj->headerOffset += size) < obj->headerLen) {
 				return	TRUE;
-			obj->status = obj->dirCnt < 0 ? FS_COMPLETE : find == FALSE ? FS_NEXTINFO : (obj->fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FS_OPENINFO : FS_TRANSFILE;
+			}
+			obj->status = obj->dirCnt < 0 ? FS_COMPLETE : !find ? FS_NEXTINFO : (obj->fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FS_OPENINFO : FS_TRANSFILE;
 		}
 	}
 
-	if (obj->status == FS_TRANSFILE)
-	{
-		if (obj->mapAddr && SendFile(obj) != TRUE)
-		{
+	if (obj->status == FS_TRANSFILE) {
+		if (obj->mapAddr && !SendFile(obj)) {
 			CloseSendFile(obj);
 			return	FALSE;
 		}
-		else if (obj->mapAddr == NULL || obj->status == FS_ENDFILE)
-		{
+		else if (obj->mapAddr == NULL || obj->status == FS_ENDFILE) {
 			CloseSendFile(obj);
 			obj->status = obj->isDir ? FS_NEXTINFO : FS_MAKEINFO;
 		}
@@ -1063,26 +1227,28 @@ BOOL TMainWin::SendDirFile(SendFileObj *obj)
 }
 
 /*
-	ÉtÉ@ÉCÉãëóéÛêM
+	„Éï„Ç°„Ç§„É´ÈÄÅÂèó‰ø°
 */
 BOOL TMainWin::SendFile(SendFileObj *obj)
 {
-	if (obj == NULL || obj->hFile == INVALID_HANDLE_VALUE)
+	if (obj == NULL || obj->hFile == INVALID_HANDLE_VALUE) {
 		return	FALSE;
+	}
 
 	int		size = 0;
 	_int64	remain = obj->fileSize - obj->offset;
 	int		transMax = cfg->TransMax - (int)(obj->offset % cfg->TransMax);
 
-	if (remain > 0 && (size = ::send(obj->conInfo->sd, obj->mapAddr + (obj->offset % cfg->ViewMax), (int)(remain > transMax ? transMax : remain), 0)) < 0)
+	if (remain > 0 && (size = ::Tsend(obj->conInfo->sd, obj->mapAddr + (obj->offset % cfg->ViewMax), (int)(remain > transMax ? transMax : remain), 0)) < 0) {
 		return	FALSE;
+	}
 
 	obj->offset += size;
 
-	if (obj->offset == obj->fileSize)
-		obj->status = obj->command == IPMSG_GETDIRFILES ? FS_ENDFILE : FS_COMPLETE;
-	else if ((obj->offset % cfg->ViewMax) == 0)	// çƒÉ}ÉbÉvÇÃïKóv
-	{
+	if (obj->offset == obj->fileSize) {
+		obj->status = GET_MODE(obj->command) == IPMSG_GETDIRFILES ? FS_ENDFILE : FS_COMPLETE;
+	}
+	else if ((obj->offset % cfg->ViewMax) == 0) {	// ÂÜç„Éû„ÉÉ„Éó„ÅÆÂøÖË¶Å
 		::UnmapViewOfFile(obj->mapAddr);
 		remain = obj->fileSize - obj->offset;
 		obj->mapAddr = (char *)::MapViewOfFile(obj->hMap, FILE_MAP_READ, (int)(obj->offset >> 32), (int)obj->offset, (int)(remain > cfg->ViewMax ? cfg->ViewMax : remain));
@@ -1093,27 +1259,56 @@ BOOL TMainWin::SendFile(SendFileObj *obj)
 	return	TRUE;
 }
 
+/*
+	„Éï„Ç°„Ç§„É´ÈÄÅÂèó‰ø°
+*/
+BOOL TMainWin::SendMemFile(SendFileObj *obj)
+{
+	if (!obj || !obj->fileInfo || !obj->fileInfo->MemData()) {
+		return	FALSE;
+	}
+
+	int		size = 0;
+	_int64	remain = obj->fileInfo->Size() - obj->offset;
+	if (remain > cfg->TransMax) remain = cfg->TransMax;
+
+	if (remain > 0 && (size = ::Tsend(obj->conInfo->sd, (const char *)obj->fileInfo->MemData() + obj->offset, (int)remain, 0)) < 0) {
+		return	FALSE;
+	}
+
+	obj->offset += size;
+
+	if (obj->offset == obj->fileInfo->Size()) {
+		obj->status = FS_COMPLETE;
+	}
+
+	obj->conInfo->lastTick = ::GetTickCount();
+
+	return	TRUE;
+}
+
 BOOL TMainWin::EndSendFile(SendFileObj *obj)
 {
-	if (obj == NULL)
-		return	FALSE;
+	if (obj == NULL) return	FALSE;
 
-	if (obj->hThread)
-	{
+	if (obj->hThread) {
 		HANDLE	hThread = obj->hThread;
-		obj->hThread = 0;	// íÜífÇÃçáê}
+		obj->hThread = 0;	// ‰∏≠Êñ≠„ÅÆÂêàÂõ≥
 		::WaitForSingleObject(hThread, INFINITE);
 		::CloseHandle(hThread);
 	}
-	if (::closesocket(obj->conInfo->sd) != 0)
-		obj->status = FS_ERROR;	// error àµÇ¢Ç…Ç∑ÇÈ
+	if (::Tclosesocket(obj->conInfo->sd) != 0) {
+		obj->status = FS_ERROR;	// error Êâ±„ÅÑ„Å´„Åô„Çã
+	}
 
 	CloseSendFile(obj);
 
-	if (obj->isDir)
+	if (obj->isDir) {
 		free(obj->hDir);
+	}
 
-	shareMng->EndHostShare(obj->packetNo, &obj->host->hostSub, obj->fileInfo, obj->status == FS_COMPLETE ? TRUE : FALSE);
+	shareMng->EndHostShare(obj->packetNo, &obj->host->hostSub,
+							obj->fileInfo, obj->status == FS_COMPLETE ? TRUE : FALSE);
 	sendFileList.DelObj(obj);
 	delete obj->conInfo;
 	delete obj;
@@ -1121,59 +1316,75 @@ BOOL TMainWin::EndSendFile(SendFileObj *obj)
 }
 
 /*
-	Entry PacketéÛêMèàóù
+	Entry PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgBrEntry(MsgBuf *msg)
 {
-	AddrObj *obj = (AddrObj *)ansList->GetObj(FREE_LIST);
+	AnsQueueObj *obj = (AnsQueueObj *)ansList->GetObj(FREE_LIST);
+	int			command = IPMSG_ANSENTRY|HostStatus();
+
+	if (msg->command & IPMSG_CAPUTF8OPT) command |= IPMSG_UTF8OPT;
+
+	if (!VerifyUserNameExtension(cfg, msg)) return;
+
 	if (obj) {
-		obj->addr = msg->hostSub.addr;
-		obj->portNo = msg->hostSub.portNo;
+		obj->hostSub = msg->hostSub;
+		obj->command = command;
 		ansList->PutObj(USED_LIST, obj);
 	}
-	if (obj == NULL || SetAnswerQueue(obj) != TRUE)
-		msgMng->Send(&msg->hostSub, IPMSG_ANSENTRY|HostStatus(), GetNickNameEx(), cfg->GroupNameStr);
+	if (obj == NULL || !SetAnswerQueue(obj)) {
+		msgMng->Send(&msg->hostSub, command, GetNickNameEx(), cfg->GroupNameStr);
+	}
 
-	AddHost(&msg->hostSub, msg->command, msg->msgBuf, msg->msgBuf + msg->exOffset);
+	AddHost(&msg->hostSub, msg->command, msg->msgBuf, msg->exBuf);
 }
 
-BOOL TMainWin::SetAnswerQueue(AddrObj *obj)
+BOOL TMainWin::SetAnswerQueue(AnsQueueObj *obj)
 {
-	if (ansTimerID)
+	if (ansTimerID) {
 		return	TRUE;
+	}
 
-	int		hostCnt = hosts.HostCnt(), spawn;
+	int		hostCnt = hosts.HostCnt();
+	DWORD	spawn;
+	DWORD	rand_val;
 
-	if (hostCnt < 50 || ((msgMng->GetLocalHost()->addr ^ obj->addr) << 8) == 0)
-		spawn = 1023 & rand();
-	else if (hostCnt < 300)
-		spawn = 2047 & rand();
-	else
-		spawn = 4095 & rand();
+	TGenRandom(&rand_val, sizeof(rand_val));
 
-	if ((ansTimerID = ::SetTimer(hWnd, IPMSG_ANS_TIMER, spawn, NULL)) == 0)
+	if (hostCnt < 50 || ((msgMng->GetLocalHost()->addr ^ obj->hostSub.addr) << 8) == 0) {
+		spawn = 1023 & rand_val;
+	}
+	else if (hostCnt < 300) {
+		spawn = 2047 & rand_val;
+	}
+	else {
+		spawn = 4095 & rand_val;
+	}
+
+	if ((ansTimerID = ::SetTimer(hWnd, IPMSG_ANS_TIMER, spawn, NULL)) == 0) {
 		return	FALSE;
+	}
 
 	return	TRUE;
 }
 
 void TMainWin::ExecuteAnsQueue(void)
 {
-	AddrObj *obj;
+	AnsQueueObj *obj;
 
-	while ((obj = (AddrObj *)ansList->GetObj(USED_LIST)) != NULL) {
-		msgMng->Send(obj->addr, obj->portNo, IPMSG_ANSENTRY|HostStatus(), GetNickNameEx(), cfg->GroupNameStr);
+	while ((obj = (AnsQueueObj *)ansList->GetObj(USED_LIST))) {
+		msgMng->Send(&obj->hostSub, obj->command, GetNickNameEx(), cfg->GroupNameStr);
 		ansList->PutObj(FREE_LIST, obj);
 	}
 }
 
 /*
-	Exit PacketéÛêMèàóù
+	Exit PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgBrExit(MsgBuf *msg)
 {
 	Host *host = cfg->priorityHosts.GetHostByName(&msg->hostSub);
-	if (host != NULL)
+	if (host)
 		host->updateTime = Time();
 	DelHost(&msg->hostSub);
 
@@ -1185,57 +1396,71 @@ void TMainWin::MsgBrExit(MsgBuf *msg)
 }
 
 /*
-	AnsEntry PacketéÛêMèàóù
+	AnsEntry PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgAnsEntry(MsgBuf *msg)
 {
-	AddHost(&msg->hostSub, msg->command, msg->msgBuf, msg->msgBuf + msg->exOffset);
+	if (!VerifyUserNameExtension(cfg, msg)) return;
+
+	AddHost(&msg->hostSub, msg->command, msg->msgBuf, msg->exBuf);
 }
 
 /*
-	Absence PacketéÛêMèàóù
+	Absence PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgBrAbsence(MsgBuf *msg)
 {
-	AddHost(&msg->hostSub, msg->command, msg->msgBuf, msg->msgBuf + msg->exOffset);
+	if (!VerifyUserNameExtension(cfg, msg)) return;
+
+	AddHost(&msg->hostSub, msg->command, msg->msgBuf, msg->exBuf);
 }
 
 /*
-	Send PacketéÛêMèàóù
+	Send PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgSendMsg(MsgBuf *msg)
 {
 	TRecvDlg	*recvDlg;
 
-	if (TRecvDlg::GetCreateCnt() >= cfg->RecvMax)
-		return;
-
-	for (recvDlg = (TRecvDlg *)recvList.TopObj(); recvDlg != NULL; recvDlg = (TRecvDlg *)recvList.NextObj(recvDlg))
-		if (recvDlg->IsSamePacket(msg))
-			break;
-
-	if (recvDlg != NULL || IsLastPacket(msg))
-	{
-		if ((msg->command & IPMSG_SENDCHECKOPT) != 0 && (msg->command & (IPMSG_BROADCASTOPT | IPMSG_AUTORETOPT)) == 0)
-			msgMng->Send(&msg->hostSub, IPMSG_RECVMSG, msg->packetNo);
+	if (!VerifyUserNameExtension(cfg, msg) &&
+		((msg->command & IPMSG_AUTORETOPT) == 0 ||
+		 (msg->command & (IPMSG_PASSWORDOPT|IPMSG_SENDCHECKOPT|IPMSG_SECRETEXOPT
+		 				 |IPMSG_FILEATTACHOPT)))) {
 		return;
 	}
 
-	if ((msg->command & IPMSG_BROADCASTOPT) == 0 && (msg->command & IPMSG_AUTORETOPT) == 0)
-	{
-		if ((msg->command & IPMSG_SENDCHECKOPT) != 0)
-			msgMng->Send(&msg->hostSub, IPMSG_RECVMSG, msg->packetNo);
+	if (TRecvDlg::GetCreateCnt() >= cfg->RecvMax) return;
 
-		if (cfg->AbsenceCheck && *cfg->AbsenceStr[cfg->AbsenceChoice])
-			msgMng->Send(&msg->hostSub, IPMSG_SENDMSG|IPMSG_AUTORETOPT, cfg->AbsenceStr[cfg->AbsenceChoice]);
-		if ((msg->command & IPMSG_NOADDLISTOPT) == 0 && hosts.GetHostByAddr(&msg->hostSub) == NULL)
+	for (recvDlg = (TRecvDlg *)recvList.TopObj(); recvDlg; recvDlg = (TRecvDlg *)recvList.NextObj(recvDlg)) {
+		if (recvDlg->IsSamePacket(msg)) break;
+	}
+
+	if (recvDlg || IsLastPacket(msg)) {
+		if ((msg->command & IPMSG_SENDCHECKOPT) &&
+			(msg->command & (IPMSG_BROADCASTOPT | IPMSG_AUTORETOPT)) == 0) {
+			msgMng->Send(&msg->hostSub, IPMSG_RECVMSG, msg->packetNo);
+		}
+		return;
+	}
+
+	if (!RecvDlgOpen(msg)) return;
+
+	if ((msg->command & IPMSG_BROADCASTOPT) == 0 && (msg->command & IPMSG_AUTORETOPT) == 0) {
+		if ((msg->command & IPMSG_SENDCHECKOPT)) {
+			msgMng->Send(&msg->hostSub, IPMSG_RECVMSG, msg->packetNo);
+		}
+		if (cfg->AbsenceCheck && *cfg->AbsenceStr[cfg->AbsenceChoice]) {
+			msgMng->Send(&msg->hostSub, IPMSG_SENDMSG|IPMSG_AUTORETOPT,
+							cfg->AbsenceStr[cfg->AbsenceChoice]);
+		}
+		if ((msg->command & IPMSG_NOADDLISTOPT) == 0 && !hosts.GetHostByAddr(&msg->hostSub)) {
 			BroadcastEntrySub(&msg->hostSub, IPMSG_BR_ENTRY);
+		}
 	}
-	RecvDlgOpen(msg);
 }
 
 /*
-	Recv PacketéÛêMèàóù
+	Recv PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgRecvMsg(MsgBuf *msg)
 {
@@ -1243,7 +1468,7 @@ void TMainWin::MsgRecvMsg(MsgBuf *msg)
 }
 
 /*
-	Read PacketéÛêMèàóù
+	Read PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgReadMsg(MsgBuf *msg)
 {
@@ -1251,56 +1476,60 @@ void TMainWin::MsgReadMsg(MsgBuf *msg)
 }
 
 /*
-	HostList ëóèoâ¬î\ñ‚çáÇπ PacketéÛêMèàóù
+	HostList ÈÄÅÂá∫ÂèØËÉΩÂïèÂêà„Åõ PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgBrIsGetList(MsgBuf *msg)
 {
 	if (cfg->AllowSendList
 		&& (entryStartTime + ((ULONG)cfg->ListGetMSec / 1000) < (ULONG)Time())
-			&& (cfg->ListGet == FALSE || (IPMSG_RETRYOPT & msg->command)))
+			&& (!cfg->ListGet || (IPMSG_RETRYOPT & msg->command))) {
 		msgMng->Send(&msg->hostSub, IPMSG_OKGETLIST);
+	}
 }
 
 /*
-	HostList ëóèoâ¬î\í ím PacketéÛêMèàóù
+	HostList ÈÄÅÂá∫ÂèØËÉΩÈÄöÁü• PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgOkGetList(MsgBuf *msg)
 {
-	if (entryStartTime != IPMSG_GETLIST_FINISH)
+	if (entryStartTime != IPMSG_GETLIST_FINISH) {
 		msgMng->Send(&msg->hostSub, IPMSG_GETLIST);
+	}
 }
 
 /*
-	HostList ëóèoóvãÅ PacketéÛêMèàóù
+	HostList ÈÄÅÂá∫Ë¶ÅÊ±Ç PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgGetList(MsgBuf *msg)
 {
-	if (cfg->AllowSendList)
+	if (cfg->AllowSendList) {
 		SendHostList(msg);
+	}
 }
 
 /*
-	HostList ëóèo PacketéÛêMèàóù
+	HostList ÈÄÅÂá∫ PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgAnsList(MsgBuf *msg)
 {
-	if (entryStartTime != IPMSG_GETLIST_FINISH)
+	if (entryStartTime != IPMSG_GETLIST_FINISH) {
 		AddHostList(msg);
+	}
 }
 
 /*
-	Version Information óvãÅ PacketéÛêMèàóù
+	Version Information Ë¶ÅÊ±Ç PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgGetInfo(MsgBuf *msg)
 {
 	char	buf[MAX_LISTBUF];
 
-	wsprintf(buf, WIN32EDITION_MSGSTR, GetVerionStr());
+	wsprintf(buf, "%sVer%s", GetLoadStrU8(IDS_WINEDITION), GetVersionStr());
 	msgMng->Send(&msg->hostSub, IPMSG_SENDINFO, buf);
 }
 
 /*
-	Version Information í ím PacketéÛêMèàóù
+	Version Information ÈÄöÁü• PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgSendInfo(MsgBuf *msg)
 {
@@ -1308,34 +1537,55 @@ void TMainWin::MsgSendInfo(MsgBuf *msg)
 }
 
 /*
-	Public Key óvãÅ PacketéÛêMèàóù
+	Public Key Ë¶ÅÊ±Ç PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgGetPubKey(MsgBuf *msg)
 {
 	int		capa = strtoul(msg->msgBuf, 0, 16);
+	int		local_capa = GetLocalCapa(cfg);
+	char	buf[MAX_BUF];
 
-	if ((capa &= (cfg->pubKey.Capa()|cfg->smallPubKey.Capa())) == 0)
+//	if (!VerifyUserNameExtension(cfg, msg)) return;
+
+	if (GetUserNameDigestField(msg->hostSub.userName)) {
+		if ((capa & IPMSG_RSA_2048) == 0 || (capa & IPMSG_SIGN_SHA1) == 0) {
+			return;	// Êàê„ÇäÊ∏à„Åæ„ÅóÔºü
+		}
+	}
+
+	if ((capa &= local_capa) == 0)
 		return;
 
-	PubKey	*pubKey = (capa & IPMSG_RSA_1024) ? &cfg->pubKey : &cfg->smallPubKey;
+	PubKey&	pubKey = (capa & IPMSG_RSA_2048) ? cfg->pub[KEY_2048] :
+					 (capa & IPMSG_RSA_1024) ? cfg->pub[KEY_1024] :
+					 						   cfg->pub[KEY_512];
 
-	char	buf[MAX_BUF];
-	wsprintf(buf, "%X:%X-", cfg->pubKey.Capa()|cfg->smallPubKey.Capa(), pubKey->Exponent());
-	bin2hexstr_bigendian(pubKey->Key(), pubKey->KeyLen(), buf + strlen(buf));
+	// ÁΩ≤ÂêçÊ§úË®ºÁî®ÂÖ¨ÈñãÈçµ„ÇíË¶ÅÊ±ÇÔºàIPMSG_AUTORETOPT „Åß„Éî„É≥„Éù„É≥ÊäëÊ≠¢Ôºâ
+	if ((capa & IPMSG_SIGN_SHA1) && (msg->command & IPMSG_AUTORETOPT) == 0) {
+		Host	*host = hosts.GetHostByName(&msg->hostSub);
+		if (!host) host = cfg->priorityHosts.GetHostByName(&msg->hostSub);
+		if (!host || !host->pubKey.Key() || !host->pubKeyUpdated) {
+			wsprintf(buf, "%x", local_capa);
+			msgMng->Send(&msg->hostSub, IPMSG_GETPUBKEY|IPMSG_AUTORETOPT, buf);
+		}
+	}
+
+	// Ëá™ÂàÜËá™Ë∫´„ÅÆÈçµ„ÇíÈÄÅ‰ø°
+	wsprintf(buf, "%X:%X-", local_capa, pubKey.Exponent());
+	bin2hexstr_revendian(pubKey.Key(), pubKey.KeyLen(), buf + strlen(buf));
 	msgMng->Send(&msg->hostSub, IPMSG_ANSPUBKEY, buf);
 }
 
 /*
-	Public Key ëóêM PacketéÛêMèàóù
+	Public Key ÈÄÅ‰ø° PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgAnsPubKey(MsgBuf *msg)
 {
-	if (cfg->pubKey.Key() == NULL && cfg->smallPubKey.Key() == NULL)
-		return;
-
 	BYTE	key[MAX_BUF];
 	int		key_len, e, capa;
 	char	*capa_hex, *e_hex, *key_hex, *p;
+
+	if (GetLocalCapa(cfg) == 0) return;
 
 	if ((capa_hex = separate_token(msg->msgBuf, ':', &p)) == NULL)
 		return;
@@ -1346,64 +1596,90 @@ void TMainWin::MsgAnsPubKey(MsgBuf *msg)
 
 	capa = strtoul(capa_hex, 0, 16);
 	e = strtoul(e_hex, 0, 16);
-	hexstr2bin_bigendian(key_hex, key, sizeof(key), &key_len);
+	hexstr2bin_revendian(key_hex, key, sizeof(key), &key_len);
 
-	for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
+	if (IsUserNameExt(cfg) && !VerifyUserNameDigest(msg->hostSub.userName, key)) {
+		return; // Illegal public key
+	}
+
+	Host	*host = hosts.GetHostByName(&msg->hostSub);
+	if (!host) host = cfg->priorityHosts.GetHostByName(&msg->hostSub);
+	if (host && (!host->pubKey.Key() || !host->pubKeyUpdated)) {
+		host->pubKey.Set(key, key_len, e, capa);
+		host->pubKeyUpdated = TRUE;
+	}
+
+	for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
 		if (sendDlg->SendPubKeyNotify(&msg->hostSub, key, key_len, e, capa))
 			break;
+	}
 }
 
 /*
-	Information í ímèàóù
+	Information ÈÄöÁü•Âá¶ÁêÜ
 */
 void TMainWin::MsgInfoSub(MsgBuf *msg)
 {
-	int		cmd = GET_MODE(msg->command);
+	int	cmd = GET_MODE(msg->command);
+	int	packet_no = (cmd == IPMSG_RECVMSG || cmd == IPMSG_ANSREADMSG || cmd == IPMSG_READMSG)
+					? atol(msg->msgBuf) : 0;
 
-	if (cmd == IPMSG_READMSG)
-	{
-		if (GET_OPT(msg->command) & IPMSG_READCHECKOPT)
+	if (cmd == IPMSG_READMSG) {
+		if (GET_OPT(msg->command) & IPMSG_READCHECKOPT) {
 			msgMng->Send(&msg->hostSub, IPMSG_ANSREADMSG, msg->packetNo);
+		}
 	}
 	else {
-		long	packet_no = (cmd == IPMSG_RECVMSG || cmd == IPMSG_ANSREADMSG) ? atol(msg->msgBuf) : 0;
-
 		if (cmd == IPMSG_ANSREADMSG) {
-			for (TRecvDlg *recvDlg = (TRecvDlg *)recvList.TopObj(); recvDlg != NULL; recvDlg = (TRecvDlg *)recvList.NextObj(recvDlg))
+			for (TRecvDlg *recvDlg = (TRecvDlg *)recvList.TopObj(); recvDlg; recvDlg = (TRecvDlg *)recvList.NextObj(recvDlg))
 				if (recvDlg->SendFinishNotify(&msg->hostSub, packet_no))
 					break;
 			return;
 		}
-		for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
-			if (sendDlg->SendFinishNotify(&msg->hostSub, packet_no))
-				break;
+
+		TSendDlg *sendDlg;
+		for (sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
+			if (sendDlg->SendFinishNotify(&msg->hostSub, packet_no)) break;
 		}
-		if (sendDlg == NULL)
-			return;
+		if (sendDlg == NULL) return;
 	}
-	if (IsLastPacket(msg))		//èdï°É`ÉFÉbÉN
+	if (IsLastPacket(msg))		//ÈáçË§á„ÉÅ„Çß„ÉÉ„ÇØ
 		return;
 
 	char	title[MAX_LISTBUF], *msg_text = msg->msgBuf;
-	int		show_mode = cfg->MsgMinimize ? SW_MINIMIZE : SW_SHOW;
-	MakeListString(cfg, &msg->hostSub, &hosts, title);
-	separate_token(title, '(');
+	int		show_mode = cfg->OpenCheck == 3 && cmd == IPMSG_READMSG ? SW_MINIMIZE : SW_SHOW;
+	Host	*host = cfg->priorityHosts.GetHostByName(&msg->hostSub);
 
-	switch (cmd)
-	{
+	if (host && *host->alterName) {
+		strcpy(title, host->alterName);
+	} else {
+		strcpy(title, host && *host->nickName ? host->nickName : msg->hostSub.userName);
+	}
+
+	switch (cmd) {
 	case IPMSG_READMSG:
-		if (cfg->OpenCheck == FALSE)
+		histDlg->OpenNotify(&msg->hostSub, packet_no);
+		SetCaption();
+		if (cfg->BalloonNoInfo) strcpy(title, " ");
+		if (cfg->OpenCheck == 1) {
+			BalloonWindow(TRAY_OPENMSG, title, GetLoadStrU8(IDS_OPENFIN), cfg->OpenMsgTime);
 			return;
-		{
-			char	*str = Ctime(), *p;
-			str = separate_token(str, ' ', &p);
-			str = separate_token(NULL, 0, &p);
-			*strrchr(str, ':') = 0;
-			wsprintf(msg_text, "%s\r\n(%s)", OPENFIN_MSGSTR, str);
+		}
+		else if (cfg->OpenCheck == 0) {
+			return;
+		}
+		else {
+			char *p =  strchr(Ctime(), ' ');
+			if (p) p++;
+			sprintf(msg_text, "%s\r\n%s", GetLoadStrU8(IDS_OPENFIN), p);
+			if ((p = strrchr(msg_text, ' '))) *p = 0;
 		}
 		break;
 
 	case IPMSG_SENDINFO:
+		histDlg->OpenNotify(&msg->hostSub, msg->packetNo, msg->msgBuf);
+		return;
+
 	case IPMSG_SENDABSENCEINFO:
 		show_mode = SW_SHOW;
 		break;
@@ -1412,18 +1688,18 @@ void TMainWin::MsgInfoSub(MsgBuf *msg)
 		return;
 	}
 
-	if (cmd == IPMSG_SENDABSENCEINFO) {	//è´óàìIÇ…ÇÕ TMsgDlgÇ≈èàóù
-		static int msg_cnt = 0;	// TMsgDlg âªÇµÇΩå„ÇÕ TMsgDlg::createCnt Ç…à⁄çs
+	if (cmd == IPMSG_SENDABSENCEINFO) {	//Â∞ÜÊù•ÁöÑ„Å´„ÅØ TMsgDlg„ÅßÂá¶ÁêÜ
+		static int msg_cnt = 0;	// TMsgDlg Âåñ„Åó„ÅüÂæå„ÅØ TMsgDlg::createCnt „Å´ÁßªË°å
 		if (msg_cnt >= cfg->RecvMax)
 			return;
 		msg_cnt++;
-		MessageBox(msg_text, title);
+		MessageBoxU8(msg_text, title);
 		msg_cnt--;
 	}
 	else {
 		if (TMsgDlg::GetCreateCnt() >= cfg->RecvMax * 4)
 			return;
-		TMsgDlg	*msgDlg = new TMsgDlg(IsNewShell() ? this : 0);
+		TMsgDlg	*msgDlg = new TMsgDlg(cfg->TaskbarUI ? 0 : this);
 		msgDlg->Create(msg_text, title, show_mode);
 		if (cmd == IPMSG_SENDINFO || cmd == IPMSG_SENDABSENCEINFO)
 			ActiveDlg(msgDlg);
@@ -1432,15 +1708,15 @@ void TMainWin::MsgInfoSub(MsgBuf *msg)
 }
 
 /*
-	ïsç›í ím Information óvãÅ PacketéÛêMèàóù
+	‰∏çÂú®ÈÄöÁü• Information Ë¶ÅÊ±Ç PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgGetAbsenceInfo(MsgBuf *msg)
 {
-	msgMng->Send(&msg->hostSub, IPMSG_SENDABSENCEINFO, cfg->AbsenceCheck ? cfg->AbsenceStr[cfg->AbsenceChoice] : NOTABSENCE_MSGSTR);
+	msgMng->Send(&msg->hostSub, IPMSG_SENDABSENCEINFO, cfg->AbsenceCheck ? cfg->AbsenceStr[cfg->AbsenceChoice] : GetLoadStrU8(IDS_NOTABSENCE));
 }
 
 /*
-	ïsç›í ím Information í ím PacketéÛêMèàóù
+	‰∏çÂú®ÈÄöÁü• Information ÈÄöÁü• PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgSendAbsenceInfo(MsgBuf *msg)
 {
@@ -1448,7 +1724,7 @@ void TMainWin::MsgSendAbsenceInfo(MsgBuf *msg)
 }
 
 /*
-	ìYïtÉtÉ@ÉCÉãîjä¸í ím PacketéÛêMèàóù
+	Ê∑ª‰ªò„Éï„Ç°„Ç§„É´Á†¥Ê£ÑÈÄöÁü• PacketÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::MsgReleaseFiles(MsgBuf *msg)
 {
@@ -1458,50 +1734,52 @@ void TMainWin::MsgReleaseFiles(MsgBuf *msg)
 }
 
 /*
-	ëóêMDialogê∂ê¨ÅBÇΩÇæÇµÅAìØàÍÇÃå}åÇëóêMDialogÇ™äJÇ¢ÇƒÇ¢ÇÈèÍçáÇÕÅA
-	ÇªÇÃDialogÇ ActiveÇ…Ç∑ÇÈÇÃÇ›ÅB
+	ÈÄÅ‰ø°DialogÁîüÊàê„ÄÇ„Åü„Å†„Åó„ÄÅÂêå‰∏Ä„ÅÆËøéÊíÉÈÄÅ‰ø°Dialog„ÅåÈñã„ÅÑ„Å¶„ÅÑ„ÇãÂ†¥Âêà„ÅØ„ÄÅ
+	„Åù„ÅÆDialog„Çí Active„Å´„Åô„Çã„ÅÆ„Åø„ÄÇ
 */
 BOOL TMainWin::SendDlgOpen(HWND hRecvWnd, MsgBuf *msg)
 {
 	TSendDlg *sendDlg;
 
-	if (hRecvWnd)
-	{
-		for (sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
-			if (sendDlg->GetRecvWnd() == hRecvWnd && sendDlg->IsSending() != TRUE)
+	if (hRecvWnd) {
+		for (sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
+			if (sendDlg->GetRecvWnd() == hRecvWnd && !sendDlg->IsSending())
 				return	ActiveDlg(sendDlg), TRUE;
 	}
 
-	if ((sendDlg = new TSendDlg(msgMng, shareMng, &hosts, cfg, logmng, hRecvWnd, msg)) == NULL)
+	if (!(sendDlg = new TSendDlg(msgMng, shareMng, &hosts, cfg, logmng, hRecvWnd, msg,
+									cfg->TaskbarUI ? this : 0))) {
 		return	FALSE;
+	}
 
 	sendList.AddObj(sendDlg);
-	sendDlg->Create(), sendDlg->Show();
+	sendDlg->Create();
+	sendDlg->Show();
+	sendDlg->SetForceForegroundWindow();
+
 	ControlIME(sendDlg, TRUE);
 
 // test
-	if (hosts.HostCnt() == 0 && cfg->ListGet == FALSE)
-		BroadcastEntrySub(inet_addr("127.0.0.1"), htons(portNo), IPMSG_BR_ENTRY);
+	if (hosts.HostCnt() == 0 && !cfg->ListGet)
+		BroadcastEntrySub(Tinet_addr("127.0.0.1"), Thtons(portNo), IPMSG_BR_ENTRY);
 
 	return	TRUE;
 }
 
 /*
-	ëóêMDialog Hideí ím(WM_SENDDLG_HIDE)èàóùÅB
-	ì`Ç¶ÇƒÇ´ÇΩëóêMDialogÇ…ëŒâûÇ∑ÇÈÅAéÛêMDialogÇîjä¸
+	ÈÄÅ‰ø°Dialog HideÈÄöÁü•(WM_SENDDLG_HIDE)Âá¶ÁêÜ„ÄÇ
+	‰ºù„Åà„Å¶„Åç„ÅüÈÄÅ‰ø°Dialog„Å´ÂØæÂøú„Åô„Çã„ÄÅÂèó‰ø°Dialog„ÇíÁ†¥Ê£Ñ
 */
 void TMainWin::SendDlgHide(TSendDlg *sendDlg)
 {
 	ControlIME(sendDlg, FALSE);
 
-	if (sendDlg->GetRecvWnd() && cfg->NoErase == FALSE)
-	{
+	if (sendDlg->GetRecvWnd() && !cfg->NoErase) {
 		TRecvDlg *recvDlg;
 
-		for (recvDlg = (TRecvDlg *)recvList.TopObj(); recvDlg != NULL; recvDlg = (TRecvDlg *)recvList.NextObj(recvDlg))
-		{
-			if (recvDlg->hWnd == sendDlg->GetRecvWnd() && recvDlg->IsClosable())
-			{
+		for (recvDlg = (TRecvDlg *)recvList.TopObj();
+				recvDlg; recvDlg = (TRecvDlg *)recvList.NextObj(recvDlg)) {
+			if (recvDlg->hWnd == sendDlg->GetRecvWnd() && recvDlg->IsClosable()) {
 				recvDlg->EvCommand(0, IDCANCEL, 0);
 				break;
 			}
@@ -1510,100 +1788,127 @@ void TMainWin::SendDlgHide(TSendDlg *sendDlg)
 }
 
 /*
-	ëóêMDialog Exití ím(WM_SENDDLG_EXIT)èàóùÅB
-	ì`Ç¶ÇƒÇ´ÇΩëóêMDialog Ç®ÇÊÇ—ëŒâûÇ∑ÇÈéÛêMDialogÇÃîjä¸
+	ÈÄÅ‰ø°Dialog ExitÈÄöÁü•(WM_SENDDLG_EXIT)Âá¶ÁêÜ„ÄÇ
+	‰ºù„Åà„Å¶„Åç„ÅüÈÄÅ‰ø°Dialog „Åä„Çà„Å≥ÂØæÂøú„Åô„ÇãÂèó‰ø°Dialog„ÅÆÁ†¥Ê£Ñ
 */
 void TMainWin::SendDlgExit(TSendDlg *sendDlg)
 {
-	if (sendDlg->IsSending() == FALSE)	// ëóêMíÜÇÃèÍçáÇÕ HIDE Ç≈é¿çsçœÇ›
+	if (!sendDlg->IsSending())	// ÈÄÅ‰ø°‰∏≠„ÅÆÂ†¥Âêà„ÅØ HIDE „ÅßÂÆüË°åÊ∏à„Åø
 		ControlIME(sendDlg, FALSE);
 	sendList.DelObj(sendDlg);
 	delete sendDlg;
 }
 
 /*
-	éÛêMDialogÇê∂ê¨
+	Âèó‰ø°Dialog„ÇíÁîüÊàê
 */
 BOOL TMainWin::RecvDlgOpen(MsgBuf *msg)
 {
 	TRecvDlg *recvDlg;
 
-	if ((recvDlg = new TRecvDlg(msgMng, msg, &hosts, cfg, logmng)) == NULL)
+	if (!(recvDlg = new TRecvDlg(msgMng, msg, &hosts, cfg, logmng, cfg->TaskbarUI ? this : 0))) {
 		return	FALSE;
-	if (recvDlg->Status() == FALSE)		// à√çÜï∂ÇÃïúçÜÇ…é∏îsÇµÇΩ
-	{
+	}
+
+	if (recvDlg->Status() == TRecvDlg::ERR) {	// ÊöóÂè∑Êñá„ÅÆÂæ©Âè∑„Å´Â§±Êïó„Åó„Åü
 		delete recvDlg;
 		return	FALSE;
 	}
 
 	recvList.AddObj(recvDlg);
 
-	if (cfg->NoBeep == FALSE)
-	{
+	if (!cfg->NoBeep) {
 		char	*soundFile = cfg->SoundFile;
 #if 0
 		Host	*host = hosts.GetHostByAddr(&msg->hostSub);
 
-		if (host)
-		{
+		if (host) {
 			int priorityLevel = (host->priority - DEFAULT_PRIORITY) / PRIORITY_OFFSET;
 
-			if (priorityLevel >= 0 && priorityLevel < cfg->PriorityMax)
-			{
+			if (priorityLevel >= 0 && priorityLevel < cfg->PriorityMax) {
 				if (cfg->PrioritySound[priorityLevel])
 					soundFile = cfg->PrioritySound[priorityLevel];
 			}
 		}
 #endif
-		if (*soundFile == '\0' || PlaySound(soundFile, 0, SND_FILENAME|SND_ASYNC) != TRUE)
-			if (MessageBeep(MB_OK) != TRUE)
-				MessageBeep((UINT)~0);
+		if (*soundFile == '\0' || !PlaySoundU8(soundFile, 0, SND_FILENAME|SND_ASYNC)) {
+			if (!MessageBeep(MB_OK)) MessageBeep((UINT)~0);
+		}
 	}
 
-	if (cfg->NoPopupCheck || (cfg->AbsenceNonPopup && cfg->AbsenceCheck))
-	{
-		if (reverseTimerStatus == 0)
-		{
-			ReverseIcon(TRUE);
-			if (::SetTimer(hWnd, IPMSG_REVERSEICON, IPMSG_TIMERINTERVAL, NULL))
-				reverseTimerStatus = IPMSG_REVERSEICON;
+	if (cfg->NoPopupCheck || (cfg->AbsenceNonPopup && cfg->AbsenceCheck)) {
+		if (cfg->BalloonNotify) {
+			Host *host = cfg->priorityHosts.GetHostByName(&msg->hostSub);
+			char buf1[MAX_LISTBUF], buf2[MAX_LISTBUF], buf3[MAX_LISTBUF*2 + 1];
+			if (host && *host->alterName) {
+				strcpy(buf1, host->alterName);
+			}
+			else {
+				MakeListString(cfg, &(msg->hostSub), &hosts, buf1);
+			}
+			if (cfg->BalloonNoInfo) strcpy(buf1, " ");
+
+			SYSTEMTIME rt = recvDlg->GetRecvTime();
+			wsprintf(buf2, "at %s", Ctime(&rt));
+			wsprintf(buf3, "%s%s%s", buf1, cfg->BalloonNoInfo ? "" : "\n", buf2);
+			BalloonWindow(TRAY_RECV, buf3, GetLoadStrU8(IDS_RECVMSG), cfg->RecvMsgTime);
+		} else {
+			// Add by snaka
+			::GNTP_SendAndRecieve(
+			    "GNTP/1.0 REGISTER NONE\r\n"
+			    "Application-Name: IP Messenger\r\n"
+				"Application-Icon: C:\\Program Files\\IpMsg\\IpMsg.png\r\n"
+				"Notifications-Count: 1\r\n"
+				"\r\n"
+				"Notification-Name: Recieve\r\n"
+				"Notification-Display-Name: Recieve\r\n"
+				"Notification-Enabled: True\r\n"
+				"\r\n"
+			);
+
+			Host *host = cfg->priorityHosts.GetHostByName(&msg->hostSub);
+			char buf1[MAX_LISTBUF];
+			if (host && *host->alterName) {
+				strcpy(buf1, host->alterName);
+			}
+			else {
+				MakeListString(cfg, &(msg->hostSub), &hosts, buf1);
+			}
+			if (cfg->BalloonNoInfo) strcpy(buf1, " ");
+
+			char *	fromUserName = buf1;
+			char	msgText[MAX_LISTBUF];
+			_snprintf_s(msgText, sizeof(msgText), sizeof(msgText)-1,
+				"%s",
+				recvDlg->GetMsgBuf()
+			);
+
+			char buf[MAX_BUF];
+			memset(buf, 0, sizeof(buf));
+			_snprintf_s(buf, sizeof(buf), sizeof(buf)-1, 
+			    "GNTP/1.0 NOTIFY NONE\r\n"
+			    "Application-Name: IP Messenger\r\n"
+			    "Notification-Name: Recieve\r\n"
+			    "Notification-Title: IP from %s\r\n"
+			    "Notification-Text: %s\r\n"
+			    "\r\n",
+				fromUserName, 
+				msgText
+			);
+			::GNTP_SendAndRecieve(buf);
 		}
-
-		// Add by snaka
-		::GNTP_SendAndRecieve(
-		    "GNTP/1.0 REGISTER NONE\r\n"
-		    "Application-Name: IP Messenger\r\n"
-			"Application-Icon: C:\\Program Files\\IpMsg\\IpMsg.png\r\n"
-			"Notifications-Count: 1\r\n"
-			"\r\n"
-			"Notification-Name: Recieve\r\n"
-			"Notification-Display-Name: Recieve\r\n"
-			"Notification-Enabled: True\r\n"
-			"\r\n"
-		);
-
-		// sjis -> utf-8
-		BYTE* fromUserName = sjis2utf8((BYTE*)recvDlg->msgHostSub()->userName);
-		BYTE* fromHost = sjis2utf8((BYTE*)recvDlg->msgHostSub()->hostName);
-		BYTE* msgText = sjis2utf8((BYTE*)recvDlg->msgText());
-
-		char buf[1024];
-		memset(buf, 0, sizeof(buf));
-		_snprintf(buf, sizeof(buf), 
-		    "GNTP/1.0 NOTIFY NONE\r\n"
-		    "Application-Name: IP Messenger\r\n"
-		    "Notification-Name: Recieve\r\n"
-		    "Notification-Title: IP from %s(%s)\r\n"
-		    "Notification-Text: %s\r\n"
-		    "\r\n",
-			fromUserName, 
-			fromHost, 
-			msgText
-		);
-		::GNTP_SendAndRecieve(buf);
+		if (reverseTimerStatus == 0) {
+			reverseCount = 0;
+			ReverseIcon(TRUE);
+			if (::SetTimer(hWnd, IPMSG_REVERSEICON, IPMSG_TIMERINTERVAL, NULL)) {
+				reverseTimerStatus = IPMSG_REVERSEICON;
+			}
+		}
+		if (recvDlg->UseClipboard()) recvDlg->Create();
 	}
 	else {
 		recvDlg->Create();
+		recvDlg->SetStatus(TRecvDlg::SHOW);
 		recvDlg->Show();
 		recvDlg->SetForceForegroundWindow();
 	}
@@ -1612,7 +1917,7 @@ BOOL TMainWin::RecvDlgOpen(MsgBuf *msg)
 }
 
 /*
-	éÛêMDialogÇîjä¸
+	Âèó‰ø°Dialog„ÇíÁ†¥Ê£Ñ
 */
 void TMainWin::RecvDlgExit(TRecvDlg *recvDlg)
 {
@@ -1621,7 +1926,7 @@ void TMainWin::RecvDlgExit(TRecvDlg *recvDlg)
 }
 
 /*
-	ämîFDialogÇîjä¸
+	Á¢∫Ë™çDialog„ÇíÁ†¥Ê£Ñ
 */
 void TMainWin::MsgDlgExit(TMsgDlg *msgDlg)
 {
@@ -1630,7 +1935,7 @@ void TMainWin::MsgDlgExit(TMsgDlg *msgDlg)
 }
 
 /*
-	Setup/About/Absence DialogÇê∂ê¨
+	Setup/About/Absence Dialog„ÇíÁîüÊàê
 */
 void TMainWin::MiscDlgOpen(TDlg *dlg)
 {
@@ -1641,34 +1946,108 @@ void TMainWin::MiscDlgOpen(TDlg *dlg)
 }
 
 /*
-	TaskTrayÇ…éwíËiconÇìoò^
+	TaskTray„Å´ÊåáÂÆöicon„ÇíÁôªÈå≤
 */
-BOOL TMainWin::TaskBar(int nimMode, HICON hSetIcon, LPCSTR tip)
+BOOL TMainWin::TaskTray(int nimMode, HICON hSetIcon, LPCSTR tip)
 {
-	NOTIFYICONDATA	tn;
+	NOTIFYICONDATA2W	tn = { sizeof(NOTIFYICONDATA2W) };
 
-	memset(&tn, 0, sizeof(tn));
-	tn.cbSize = sizeof(tn);
 	tn.hWnd = hWnd;
-	tn.uID = IPMSG_DEFAULT_PORT;		// test
+	tn.uID = WM_NOTIFY_TRAY;
 	tn.uFlags = NIF_MESSAGE|(hSetIcon ? NIF_ICON : 0)|(tip ? NIF_TIP : 0);
-	tn.uCallbackMessage = WM_IPMSG_NOTIFY;
+	tn.uCallbackMessage = WM_NOTIFY_TRAY;
 	tn.hIcon = hSetIcon;
-	if (tip)
-		strcpy(tn.szTip, tip);
+	if (tip) {
+		U8toW(tip, tn.szTip, sizeof(tn.szTip) / sizeof(WCHAR));
+	}
 
-	return	::Shell_NotifyIcon(nimMode, &tn);
+	return	::Shell_NotifyIconW(nimMode, (NOTIFYICONDATAW *)&tn);
+}
+
+inline int strcharcount(const char *s, char c) {
+	int ret = 0;
+	while (*s) if (*s++ == c) ret++;
+	return	ret;
+}
+/*
+	ÈÄöÁü•„Éü„Éã„Ç¶„Ç£„É≥„Éâ„Ç¶Ë°®Á§∫
+*/
+BOOL TMainWin::BalloonWindow(TrayMode _tray_mode, LPCSTR msg, LPCSTR title, DWORD timer)
+{
+	NOTIFYICONDATA2W	tn = { sizeof(tn) };
+
+	tn.hWnd = hWnd;
+	tn.uID = WM_NOTIFY_TRAY;
+	tn.uFlags = NIF_INFO|NIF_MESSAGE|(_tray_mode == TRAY_RECV ? NIF_ICON : 0);
+	tn.uCallbackMessage = WM_NOTIFY_TRAY;
+	tn.hIcon = TMainWin::hMainIcon;
+
+	if (msg && title) {
+		U8toW(msg,   tn.szInfo,      sizeof(tn.szInfo) / sizeof(WCHAR));
+		U8toW(title, tn.szInfoTitle, sizeof(tn.szInfoTitle) / sizeof(WCHAR));
+	}
+
+	tn.uTimeout		= timer;
+	tn.dwInfoFlags	= (_tray_mode == TRAY_RECV ? NIIF_USER : NIIF_INFO) | NIIF_NOSOUND;
+
+	if (msg) {
+		if (trayMode != _tray_mode && trayMode != TRAY_NORMAL) {
+			::KillTimer(hWnd,
+				trayMode == TRAY_RECV ? IPMSG_BALLOON_RECV_TIMER : IPMSG_BALLOON_OPEN_TIMER);
+		}
+		trayMode = _tray_mode;
+		if (trayMode == TRAY_RECV) {
+			::SetTimer(hWnd, IPMSG_BALLOON_RECV_TIMER, timer, NULL);
+		}
+		else {
+			if (!::GetForegroundWindow()) {
+				::SetTimer(hWnd, IPMSG_BALLOON_DELAY_TIMER, 1000, NULL);
+				if (msg != trayMsg) {
+					int	len = (int)strlen(trayMsg);
+					int	msg_len = (int)strlen(msg);
+					int	msg_cnt = strcharcount(msg, '\n');
+					if (len + msg_len + 10 < sizeof(trayMsg) && msg_cnt <= 5) {
+						if (len > 0) trayMsg[len++] = '\n';
+						if (msg_cnt <= 4) memcpy(trayMsg + len, msg, msg_len + 1);
+						else              strcpy(trayMsg + len, " ... ");
+					}
+				}
+				return	FALSE;
+			}
+			::SetTimer(hWnd, IPMSG_BALLOON_OPEN_TIMER, timer, NULL);
+		}
+	}
+	else {
+		trayMode = TRAY_NORMAL;
+	}
+
+	if (IsWinVista()) {	// Vista‰ª•Èôç„Åß„ÅØ uTimeout „Åß„ÅØ„Å™„Åè SPI_SETMESSAGEDURATION „Åå‰Ωø„Çè„Çå„Çã„ÄÇ
+		DWORD	val = 5;
+		::SystemParametersInfo(SPI_GETMESSAGEDURATION, 0, (void *)&val, 0);
+		if (timer + 4000 > val * 1000) {
+			::SystemParametersInfo(SPI_SETMESSAGEDURATION, 0, (void *)((timer + 4999) / 1000), 0);
+		}
+		BOOL	ret = ::Shell_NotifyIconW(NIM_MODIFY, (NOTIFYICONDATAW *)&tn);
+		if (timer + 4000 > val * 1000) {
+			::SystemParametersInfo(SPI_SETMESSAGEDURATION, 0, (void *)val, 0);
+		}
+		return	ret;
+	}
+
+	return	::Shell_NotifyIconW(NIM_MODIFY, (NOTIFYICONDATAW *)&tn);
 }
 
 /*
-	MainWindow or TaskTray Icon Ç clickÇµÇΩéûÇÃ Popup Menuê∂ê¨
+	MainWindow or TaskTray Icon „Çí click„Åó„ÅüÊôÇ„ÅÆ Popup MenuÁîüÊàê
 */
 void TMainWin::Popup(UINT resId)
 {
-	HMENU	hMenu = ::LoadMenu(TApp::hI, (LPCSTR)resId);
-	HMENU	hSubMenu = ::GetSubMenu(hMenu, 0);	//Ç©Ç»ÇÁÇ∏ÅAç≈èâÇÃçÄñ⁄Ç…íËã`
-	DWORD	val = ::GetMessagePos();
-	POINTS	pos = MAKEPOINTS(val);
+	HMENU	hMenu = ::LoadMenu(TApp::GetInstance(), (LPCSTR)resId);
+	HMENU	hSubMenu = ::GetSubMenu(hMenu, 0);	//„Åã„Å™„Çâ„Åö„ÄÅÊúÄÂàù„ÅÆÈ†ÖÁõÆ„Å´ÂÆöÁæ©
+	POINT	pt = {0};
+	char	buf[MAX_LISTBUF];
+
+	::GetCursorPos(&pt);
 
 	if (hMenu == NULL || hSubMenu == NULL)
 		return;
@@ -1676,50 +2055,55 @@ void TMainWin::Popup(UINT resId)
 	ShareCntInfo	info;
 	shareMng->GetShareCntInfo(&info);
 
-	char	buf[MAX_LISTBUF] = DOWNLOAD_MSGSTR;
+	strcpy(buf, GetLoadStrU8(IDS_DOWNLOAD));
 	if (info.packetCnt)
 		wsprintf(buf + strlen(buf), "(%d/%d)", info.fileCnt, info.transferCnt);
-	::InsertMenu(hSubMenu, 0, MF_BYPOSITION|MF_SEPARATOR, NULL, NULL);
-	::InsertMenu(hSubMenu, 0, MF_BYPOSITION|MF_STRING, MENU_SHARE, buf);
+	InsertMenuU8(hSubMenu, 0, MF_BYPOSITION|MF_STRING, MENU_SHARE, buf);
+
+	strcpy(buf, GetLoadStrU8(IDS_UNOPENED));
+	if (histDlg->UnOpenedNum())
+		wsprintf(buf + strlen(buf), "(%d)", histDlg->UnOpenedNum());
+	InsertMenuU8(hSubMenu, 1, MF_BYPOSITION|MF_STRING, MENU_OPENHISTDLG, buf);
+
+	InsertMenuU8(hSubMenu, 2, MF_BYPOSITION|MF_SEPARATOR, NULL, NULL);
 
 	AddAbsenceMenu(hSubMenu, 2);
 
-	SetForegroundWindow();		//Ç∆Ç¡ÇƒÇ‡ëÂéñÅI
+	SetForegroundWindow();		//„Å®„Å£„Å¶„ÇÇÂ§ß‰∫ãÔºÅ
 
-	::TrackPopupMenu(hSubMenu, TPM_RIGHTBUTTON, pos.x, pos.y, 0, hWnd, NULL);
+	::TrackPopupMenu(hSubMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hWnd, NULL);
 
 	::DestroyMenu(hMenu);
 }
 
 /*
-	NonPopupèÛë‘Ç…Ç»Ç¡ÇƒÇ¢ÇΩéÛêMDialogÇ™Ç†ÇÍÇŒÅAèoåªÇ≥ÇπÇÈ
+	NonPopupÁä∂ÊÖã„Å´„Å™„Å£„Å¶„ÅÑ„ÅüÂèó‰ø°Dialog„Åå„ÅÇ„Çå„Å∞„ÄÅÂá∫Áèæ„Åï„Åõ„Çã
 */
 BOOL TMainWin::PopupCheck(void)
 {
 	BOOL		result = FALSE; 
 	TRecvDlg	*recvDlg;
 
-	for (recvDlg = (TRecvDlg *)recvList.TopObj(); recvDlg != NULL; recvDlg = (TRecvDlg *)recvList.NextObj(recvDlg))
-	{
-		if (recvDlg->hWnd == 0)
-		{
-			recvDlg->Create(), recvDlg->Show();
+	::KillTimer(hWnd, IPMSG_REVERSEICON);
+	reverseTimerStatus = 0;
+	SetIcon(cfg->AbsenceCheck ? hRevIcon : hMainIcon);
+	BalloonWindow(TRAY_NORMAL);
+
+	for (recvDlg = (TRecvDlg *)recvList.TopObj(); recvDlg; recvDlg = (TRecvDlg *)recvList.NextObj(recvDlg)) {
+		if (!recvDlg->hWnd) recvDlg->Create();
+		if (recvDlg->Status() == TRecvDlg::INIT) {
+			recvDlg->SetStatus(TRecvDlg::SHOW);
+			recvDlg->Show();
+			recvDlg->SetForceForegroundWindow();
 			result = TRUE;
 		}
-	}
-
-	if (result)
-	{
-		::KillTimer(hWnd, IPMSG_REVERSEICON);
-		reverseTimerStatus = 0;
-		SetIcon(cfg->AbsenceCheck == FALSE ? hMainIcon : hRevIcon);
 	}
 
 	return	result;
 }
 
 /*
-	ëSWindowÇëOñ Ç…Ç‡Ç¡ÇƒÇ≠ÇÈÅBhide == TRUEÇÃèÍçáÅAëSWindowÇ hideÇ…
+	ÂÖ®Window„ÇíÂâçÈù¢„Å´„ÇÇ„Å£„Å¶„Åè„Çã„ÄÇhide == TRUE„ÅÆÂ†¥Âêà„ÄÅÂÖ®Window„Çí hide„Å´
 */
 void TMainWin::ActiveChildWindow(BOOL active)
 {
@@ -1727,18 +2111,18 @@ void TMainWin::ActiveChildWindow(BOOL active)
 	ActiveDlg(setupDlg, active);
 	ActiveDlg(absenceDlg, active);
 	ActiveDlg(shareStatDlg, active);
+	ActiveDlg(histDlg, active);
 	ActiveListDlg(&recvList, active);
 	ActiveListDlg(&sendList, active);
 	ActiveListDlg(&msgList, active);
 
-	if (active == FALSE)
-		SetForegroundWindow();
+	if (!active) SetForegroundWindow();
 }
 
 /*
-	HostDataÇÃcopy
+	HostData„ÅÆcopy
 */
-inline void TMainWin::SetHostData(Host *destHost, HostSub *hostSub, ULONG command, time_t update_time, char *nickName, char *groupName, int priority)
+inline void TMainWin::SetHostData(Host *destHost, HostSub *hostSub, ULONG command, Time_t update_time, char *nickName, char *groupName, int priority)
 {
 	destHost->hostStatus = GET_OPT(command);
 	destHost->hostSub = *hostSub;
@@ -1749,22 +2133,23 @@ inline void TMainWin::SetHostData(Host *destHost, HostSub *hostSub, ULONG comman
 }
 
 /*
-	Hostí«â¡èàóù
+	HostËøΩÂä†Âá¶ÁêÜ
 */
 void TMainWin::AddHost(HostSub *hostSub, ULONG command, char *nickName, char *groupName)
 {
 	Host	*host, *tmp_host, *priorityHost;
-	time_t	now_time = Time();
+	Time_t	now_time = Time();
 	int		priority = DEFAULT_PRIORITY;
 
-	if (GET_MODE(command) == IPMSG_BR_ENTRY && (command & IPMSG_DIALUPOPT) && !IsSameHost(hostSub, msgMng->GetLocalHost()))
-	{
-		for (AddrObj *obj = (AddrObj *)cfg->DialUpList.TopObj(); obj != NULL; obj = (AddrObj *)cfg->DialUpList.NextObj(obj))
-			if (obj->addr == hostSub->addr && obj->portNo == hostSub->portNo)
+	if (GET_MODE(command) == IPMSG_BR_ENTRY && (command & IPMSG_DIALUPOPT) && !IsSameHost(hostSub, msgMng->GetLocalHost())) {
+		AddrObj *obj;
+		for (obj = (AddrObj *)cfg->DialUpList.TopObj(); obj; obj = (AddrObj *)cfg->DialUpList.NextObj(obj)) {
+			if (obj->addr == hostSub->addr && obj->portNo == hostSub->portNo) {
 				break;
+			}
+		}
 
-		if (obj == NULL)
-		{
+		if (!obj) {
 			obj = new AddrObj;
 			obj->addr	= hostSub->addr;
 			obj->portNo	= hostSub->portNo;
@@ -1772,20 +2157,41 @@ void TMainWin::AddHost(HostSub *hostSub, ULONG command, char *nickName, char *gr
 		}
 	}
 
-	if ((priorityHost = cfg->priorityHosts.GetHostByName(hostSub)) != NULL)
-	{
+	if ((priorityHost = cfg->priorityHosts.GetHostByName(hostSub))) {
 		priority = priorityHost->priority;
 //		command |= priorityHost->hostStatus & IPMSG_ENCRYPTOPT;
+
+	}	// ÂæìÊù•„É¶„Éº„Ç∂Âêç„Åß„ÅÆÂÑ™ÂÖàÂ∫¶Ë®≠ÂÆö„ÇíÊã°Âºµ„É¶„Éº„Ç∂Âêç„Å´Âºï„ÅçÁ∂ô„Åê
+	else {
+		char	*p = (char *)GetUserNameDigestField(hostSub->userName);
+
+		if (p) {
+			*p = 0;
+			priorityHost = cfg->priorityHosts.GetHostByName(hostSub);
+			*p = '-';
+			if (priorityHost) {
+				priority = priorityHost->priority;
+// Âè§„ÅÑ„Ç®„É≥„Éà„É™„ÇíÂâäÈô§„Å´„Åô„ÇãÂá¶ÁêÜ„ÅØ„ÄÅÊßòÂ≠êË¶ã
+//				cfg->priorityHosts.DelHost(priorityHost);
+//				if (priorityHost->RefCnt() == 0)
+//					delete priorityHost;
+//				writeRegFlags |= CFG_DELHOST;
+// ‰ª£„Çè„Çä„Å´„ÄÅÂè§„ÅÑ„Ç®„É≥„Éà„É™„ÅÆÊúâÂäπÊúüÈñì„ÇíÁü≠„ÅèÔºà30Êó•Âæå„Å´ expireÔºâ
+				Time_t	t = Time() - (cfg->KeepHostTime - 3600 * 24 * 30);
+				if (priorityHost->updateTime > t) priorityHost->updateTime = t;
+
+				priorityHost = NULL;
+			}
+		}
 	}
 
-	if ((host = hosts.GetHostByName(hostSub)) != NULL)
-	{
-		if (host->hostSub.addr != hostSub->addr || host->hostSub.portNo != hostSub->portNo)
-		{
-			if ((tmp_host = hosts.GetHostByAddr(hostSub)) != NULL)
-			{
-				for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
+	if ((host = hosts.GetHostByName(hostSub))) {
+		if (host->hostSub.addr != hostSub->addr || host->hostSub.portNo != hostSub->portNo) {
+			if ((tmp_host = hosts.GetHostByAddr(hostSub))) {
+
+				for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
 					sendDlg->DelHost(tmp_host);
+				}
 				hosts.DelHost(tmp_host);
 				if (tmp_host->RefCnt() == 0)
 					delete tmp_host;
@@ -1795,11 +2201,13 @@ void TMainWin::AddHost(HostSub *hostSub, ULONG command, char *nickName, char *gr
 			host->hostSub.portNo = hostSub->portNo;
 			hosts.AddHost(host);
 		}
-		if (((command ^ host->hostStatus) & (IPMSG_ABSENCEOPT|IPMSG_FILEATTACHOPT|IPMSG_ENCRYPTOPT)) || strcmp(host->nickName, nickName) || strcmp(host->groupName, groupName))
-		{
+
+		if (((command ^ host->hostStatus) & (IPMSG_ABSENCEOPT|IPMSG_FILEATTACHOPT|IPMSG_ENCRYPTOPT)) || strcmp(host->nickName, nickName) || strcmp(host->groupName, groupName)) {
+
 			SetHostData(host, hostSub, command, now_time, nickName, groupName, priority);
-			for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
+			for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
 				sendDlg->ModifyHost(host);
+			}
 		}
 		else {
 			host->hostStatus = GET_OPT(command);
@@ -1808,100 +2216,113 @@ void TMainWin::AddHost(HostSub *hostSub, ULONG command, char *nickName, char *gr
 		return;
 	}
 
-	if ((host = hosts.GetHostByAddr(hostSub)) != NULL)
-	{
-		for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
+	if ((host = hosts.GetHostByAddr(hostSub))) {
+		for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
 			sendDlg->DelHost(host);
+		}
 		hosts.DelHost(host);
-		if (host->RefCnt() == 0)
+		if (host->RefCnt() == 0) {
 			delete host;
+		}
 	}
 
-	if ((host = priorityHost) == NULL)
+	if ((host = priorityHost) == NULL) {
 		host = new Host;
+	}
 
 	SetHostData(host, hostSub, command, now_time, nickName, groupName, priority);
 	hosts.AddHost(host);
-//	if (priorityHost == NULL)
-//		cfg->priorityHosts.AddHost(host);
+	if (priorityHost == NULL) {
+		cfg->priorityHosts.AddHost(host);
+	}
 
 	SetCaption();
 
-	for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
+	for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
 		sendDlg->AddHost(host);
+	}
 }
 
 /*
-	ëSHostÇÃçÌèúèàóù
+	ÂÖ®Host„ÅÆÂâäÈô§Âá¶ÁêÜ
 */
 void TMainWin::DelAllHost(void)
 {
-	for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
+	for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
 		sendDlg->DelAllHost();
+	}
 
-	while (hosts.HostCnt() > 0)
+	while (hosts.HostCnt() > 0) {
 		DelHostSub(hosts.GetHost(0));
+	}
 }
 
 /*
-	ì¡íËHostÇÃçÌèúèàóù
+	ÁâπÂÆöHost„ÅÆÂâäÈô§Âá¶ÁêÜ
 */
 void TMainWin::DelHost(HostSub *hostSub)
 {
 	Host *host;
 
-	if ((host = hosts.GetHostByAddr(hostSub)) != NULL)
+	if ((host = hosts.GetHostByAddr(hostSub))) {
 		DelHostSub(host);
+	}
 }
 
 /*
-	ì¡íËHostÇÃçÌèúèàóùSub
+	ÁâπÂÆöHost„ÅÆÂâäÈô§Âá¶ÁêÜSub
 */
 void TMainWin::DelHostSub(Host *host)
 {
-	for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
+	for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
 		sendDlg->DelHost(host);
+	}
 
-	for (AddrObj *obj = (AddrObj *)cfg->DialUpList.TopObj(); obj != NULL; obj = (AddrObj *)cfg->DialUpList.NextObj(obj))
-	{
-		if (obj->addr == host->hostSub.addr && obj->portNo == host->hostSub.portNo)
-		{
+	for (AddrObj *obj = (AddrObj *)cfg->DialUpList.TopObj(); obj; obj = (AddrObj *)cfg->DialUpList.NextObj(obj)) {
+		if (obj->addr == host->hostSub.addr && obj->portNo == host->hostSub.portNo) {
 			cfg->DialUpList.DelObj(obj);
 			delete obj;
 			break;
 		}
 	}
 	hosts.DelHost(host);
-	if (host->RefCnt() == 0)
+	if (host->RefCnt() == 0) {
 		delete host;
-	else if (host->pubKey.Key())
-		host->pubKey.UnSet();
+	}
+	else if (host->pubKey.Key()) {
+		 if (!(host->pubKey.Capa() & IPMSG_RSA_2048)) {
+			host->pubKey.UnSet();
+		}
+		host->pubKeyUpdated = FALSE;
+	}
 	SetCaption();
 }
 
 /*
-	çXêVButtonópèàóùÅBèäóLHostListÇÃçÌèúÅAÇ®ÇÊÇ—çƒEntry PacketëóèoÅB
-	Ç»Ç®ÅAunRemoveFlg == TRUEÇÃèÍçáÇÕÅAçÌèúèàóùÇçsÇÌÇ»Ç¢
+	Êõ¥Êñ∞ButtonÁî®Âá¶ÁêÜ„ÄÇÊâÄÊúâHostList„ÅÆÂâäÈô§„ÄÅ„Åä„Çà„Å≥ÂÜçEntry PacketÈÄÅÂá∫„ÄÇ
+	„Å™„Åä„ÄÅunRemoveFlg == TRUE„ÅÆÂ†¥Âêà„ÅØ„ÄÅÂâäÈô§Âá¶ÁêÜ„ÇíË°å„Çè„Å™„ÅÑ
 */
 void TMainWin::RefreshHost(BOOL unRemoveFlg)
 {
-	time_t	now_time = Time();
+	Time_t	now_time = Time();
+
+	MakeBrListEx();
 
 	if (cfg->ListGet && entryTimerStatus != 0 || refreshStartTime + IPMSG_ENTRYMINSEC >= now_time)
 		return;
 
-	if (unRemoveFlg != TRUE)
-	{
+	if (!unRemoveFlg) {
 		if (cfg->UpdateTime == 0 || refreshStartTime + cfg->UpdateTime < now_time) {
 			DelAllHost();
 		}
 		else {
-			for (int cnt=0; cnt < hosts.HostCnt(); )
-			{
-				if (hosts.GetHost(cnt)->updateTime + cfg->UpdateTime < now_time)
+			for (int cnt=0; cnt < hosts.HostCnt(); ) {
+				if (hosts.GetHost(cnt)->updateTime + cfg->UpdateTime < now_time) {
 					DelHostSub(hosts.GetHost(cnt));
-				else
+				}
+				else {
 					cnt++;
+				}
 			}
 		}
 	}
@@ -1910,137 +2331,141 @@ void TMainWin::RefreshHost(BOOL unRemoveFlg)
 }
 
 /*
-	Main Window or TaskTrayóp CaptionÇÃê›íË
+	Main Window or TaskTrayÁî® Caption„ÅÆË®≠ÂÆö
 */
 void TMainWin::SetCaption(void)
 {
 	char	buf[MAX_LISTBUF];
+	int		len;
 
-	wsprintf(buf, "IPMsg(%d)", hosts.HostCnt());
+	len = wsprintf(buf, GetLoadStrU8(IDS_CAPTION), hosts.HostCnt());
 
-	if (IsNewShell())
-		TaskBar(NIM_MODIFY, NULL, buf);
-	else
-		::SetWindowText(hWnd, buf);
+	if (histDlg->UnOpenedNum()) {
+		wsprintf(buf + len, GetLoadStrU8(IDS_CAPTIONADD), histDlg->UnOpenedNum());
+	}
+
+	if (cfg->TaskbarUI) {
+		SetWindowTextU8(buf);
+	}
+	TaskTray(NIM_MODIFY, NULL, buf);
 }
 
 /*
-	IPMSG_ENTRY/IPMSG_EXIT/IPMSG_ABSENCEÉpÉPÉbÉgëóèo
+	IPMSG_ENTRY/IPMSG_EXIT/IPMSG_ABSENCE„Éë„Ç±„ÉÉ„ÉàÈÄÅÂá∫
 */
 void TMainWin::BroadcastEntry(ULONG mode)
 {
-	for (TBroadcastObj *brobj=cfg->broadcastList.Top(); brobj; brobj=cfg->broadcastList.Next(brobj))
-		BroadcastEntrySub(brobj->Addr(cfg->ResolveOpt & RS_REALTIME), htons(portNo), IPMSG_NOOPERATION);
-	BroadcastEntrySub((ULONG)~0, htons(portNo), IPMSG_NOOPERATION);
+	TBrObj *brobj;
+	for (brobj=brListEx.Top(); brobj; brobj=brListEx.Next(brobj)) {
+		BroadcastEntrySub(brobj->Addr(), Thtons(portNo), IPMSG_NOOPERATION);
+	}
 
 	this->Sleep(cfg->DelayTime);
 
 	UINT host_status = mode | HostStatus();
 
-	msgMng->Send((ULONG)~0, htons(portNo), host_status, GetNickNameEx(), cfg->GroupNameStr);	// local network broadcast
+	for (brobj=brListEx.Top(); brobj; brobj=brListEx.Next(brobj)) {
+		BroadcastEntrySub(brobj->Addr(), Thtons(portNo), host_status);
+	}
 
-	for (brobj=cfg->broadcastList.Top(); brobj; brobj=cfg->broadcastList.Next(brobj))
-		BroadcastEntrySub(brobj->Addr(), htons(portNo), host_status);
-
-	for (AddrObj *obj = (AddrObj *)cfg->DialUpList.TopObj(); obj != NULL; obj = (AddrObj *)cfg->DialUpList.NextObj(obj))
+	for (AddrObj *obj = (AddrObj *)cfg->DialUpList.TopObj(); obj; obj = (AddrObj *)cfg->DialUpList.NextObj(obj)) {
 		BroadcastEntrySub(obj->addr, obj->portNo, host_status);
+	}
 
-	if (mode == IPMSG_BR_ENTRY && cfg->ExtendEntry)
+	if (mode == IPMSG_BR_ENTRY && cfg->ExtendEntry) {
 		::SetTimer(hWnd, IPMSG_ENTRY_TIMER, IPMSG_ENTRYMINSEC * 1000, NULL);
+	}
 }
 
 /*
-	IPMSG_ENTRY/IPMSG_EXIT/IPMSG_ABSENCEÉpÉPÉbÉgëóèoSub
+	IPMSG_ENTRY/IPMSG_EXIT/IPMSG_ABSENCE„Éë„Ç±„ÉÉ„ÉàÈÄÅÂá∫Sub
 */
 void TMainWin::BroadcastEntrySub(ULONG addr, int port_no, ULONG mode)
 {
-	if (addr == 0)
-		return;
+	if (addr == 0) return;
 
-	HostSub	hostSub;
-
-	hostSub.addr 	= addr;
-	hostSub.portNo	= port_no;
-
-	BroadcastEntrySub(&hostSub, mode);
+	msgMng->Send(addr, port_no, mode | (cfg->DialUpCheck ? IPMSG_DIALUPOPT : 0) | HostStatus(),
+				 GetNickNameEx(), cfg->GroupNameStr);
 }
 
 void TMainWin::BroadcastEntrySub(HostSub *hostSub, ULONG mode)
 {
-	if (mode == IPMSG_NOOPERATION)
-		msgMng->Send(hostSub, mode);
-	else
-		msgMng->Send(hostSub, mode | (cfg->DialUpCheck ? IPMSG_DIALUPOPT : 0) | HostStatus(), GetNickNameEx(),  cfg->GroupNameStr);
+	BroadcastEntrySub(hostSub->addr, hostSub->portNo, mode);
 }
 
 /*
-	icon îΩì]èàóùÅBstartFlg == TRUEÇÃèÍçáÅAãticonÇ… ResetÇ≥ÇÍÇÈ
+	icon ÂèçËª¢Âá¶ÁêÜ„ÄÇstartFlg == TRUE„ÅÆÂ†¥Âêà„ÄÅÈÄÜicon„Å´ Reset„Åï„Çå„Çã
 */
 void TMainWin::ReverseIcon(BOOL startFlg)
 {
-	static	cnt = 0;
+	static int cnt = 0;
 
-	if (startFlg)
-		cnt = 0;
+	if (startFlg) cnt = 0;
 
 	SetIcon(cnt++ % 2 ? hMainIcon : hRevIcon);
 }
 
 /*
-	éwíËiconÇ MainWindow or TaskTray Ç…ÉZÉbÉg
+	ÊåáÂÆöicon„Çí MainWindow or TaskTray „Å´„Çª„ÉÉ„Éà
 */
 void TMainWin::SetIcon(HICON hSetIcon)
 {
-	if (IsNewShell())
-		TaskBar(NIM_MODIFY, hSetIcon);
-	else {
+	if (cfg->TaskbarUI) {
 		::SetClassLong(hWnd, GCL_HICON, (LONG)hSetIcon);
-		::FlashWindow(hWnd, FALSE);
+//		::FlashWindow(hWnd, FALSE);
 	}
+	TaskTray(NIM_MODIFY, hSetIcon);
 }
 
 /*
-	HostListëóèoèàóù
-	éËî≤Ç´ ... ÉfÉäÉ~É^Ç‚ÉfÅ[É^Ç™Ç»Ç¢èÍçáÇ…ì¡éÍï∂éö('\a','\b')Çégóp
+	HostListÈÄÅÂá∫Âá¶ÁêÜ
+	ÊâãÊäú„Åç ... „Éá„É™„Éü„Çø„ÇÑ„Éá„Éº„Çø„Åå„Å™„ÅÑÂ†¥Âêà„Å´ÁâπÊÆäÊñáÂ≠ó('\a','\b')„Çí‰ΩøÁî®
 */
 void TMainWin::SendHostList(MsgBuf *msg)
 {
 	int		start_no, len, total_len = 0, host_cnt = 0;
 	char	*buf = new char [MAX_UDPBUF];
-	char	tmp[MAX_BUF];
+	char	tmp[MAX_BUF], *tmp_p = tmp;
+	char	tmp_mbcs[MAX_BUF];
+	int		utf8opt = (msg->command & (IPMSG_CAPUTF8OPT|IPMSG_UTF8OPT)) ? IPMSG_UTF8OPT : 0;
 
 	if ((start_no = atoi(msg->msgBuf)) < 0)
 		start_no = 0;
 
 	total_len = wsprintf(buf, "%5d%c%5d%c", 0, HOSTLIST_SEPARATOR, 0, HOSTLIST_SEPARATOR);
 
-	for (int cnt=start_no; cnt < hosts.HostCnt(); cnt++)
-	{
+	for (int cnt=start_no; cnt < hosts.HostCnt(); cnt++) {
 		Host	*host = hosts.GetHost(cnt);
-		if ((len = wsprintf(tmp, "%s%c%s%c%ld%c%s%c%d%c%s%c%s%c",
+
+		len = wsprintf(tmp, "%s%c%s%c%ld%c%s%c%d%c%s%c%s%c",
 			host->hostSub.userName, HOSTLIST_SEPARATOR,
 			host->hostSub.hostName, HOSTLIST_SEPARATOR,
 			host->hostStatus, HOSTLIST_SEPARATOR,
-			inet_ntoa(*(LPIN_ADDR)&host->hostSub.addr), HOSTLIST_SEPARATOR,
+			::Tinet_ntoa(*(LPIN_ADDR)&host->hostSub.addr), HOSTLIST_SEPARATOR,
 			host->hostSub.portNo, HOSTLIST_SEPARATOR,
 			*host->nickName ? host->nickName : HOSTLIST_DUMMY, HOSTLIST_SEPARATOR,
-			*host->groupName ? host->groupName : HOSTLIST_DUMMY, HOSTLIST_SEPARATOR
-			)) + total_len +80 >= MAX_UDPBUF)	// +80 : ipmsg protocol header reserve
-		{
+			*host->groupName ? host->groupName : HOSTLIST_DUMMY, HOSTLIST_SEPARATOR);
+
+		if (!utf8opt) { // MBCS mode
+			len = sprintf(tmp_mbcs, "%s", U8toA(tmp));
+			tmp_p = tmp_mbcs;
+		}
+
+		if (len + total_len +80 >= MAX_UDPBUF) {	// +80 : ipmsg protocol header reserve
 			break;
 		}
-		memcpy(buf + total_len, tmp, len +1);
+		memcpy(buf + total_len, tmp_p, len +1);
 		total_len += len;
 		host_cnt++;
 	}
-	len = wsprintf(tmp, "%5d%c%5d", start_no + host_cnt == hosts.HostCnt() ? 0 : start_no + host_cnt, HOSTLIST_SEPARATOR, host_cnt);
+	len = wsprintf(tmp, "%5d%c%5d", (start_no + host_cnt == hosts.HostCnt()) ? 0 : start_no + host_cnt, HOSTLIST_SEPARATOR, host_cnt);
 	memcpy(buf, tmp, len);
-	msgMng->Send(&msg->hostSub, IPMSG_ANSLIST, buf);
+	msgMng->Send(&msg->hostSub, IPMSG_ANSLIST|utf8opt, buf);
 	delete [] buf;
 }
 
 /*
-	HostListéÛêMèàóù
+	HostListÂèó‰ø°Âá¶ÁêÜ
 */
 void TMainWin::AddHostList(MsgBuf *msg)
 {
@@ -2057,8 +2482,8 @@ void TMainWin::AddHostList(MsgBuf *msg)
 		return;
 	total_num = atoi(tok);
 
-	for (int host_cnt=0; (tok = separate_token(NULL, HOSTLIST_SEPARATOR, &p)) != NULL; host_cnt++)
-	{
+	int host_cnt;
+	for (host_cnt=0; (tok = separate_token(NULL, HOSTLIST_SEPARATOR, &p)); host_cnt++) {
 		nickName = groupName = NULL;
 		strncpyz(hostSub.userName, tok, sizeof(hostSub.userName));
 
@@ -2070,9 +2495,13 @@ void TMainWin::AddHostList(MsgBuf *msg)
 			break;
 		host_status = GET_OPT(atol(tok));
 
+		if (GetUserNameDigestField(hostSub.userName) && (host_status & IPMSG_ENCRYPTOPT) == 0) {
+			continue; // Êàê„ÇäÊ∏à„Åæ„ÅóÔºü
+		}
+
 		if ((tok = separate_token(NULL, HOSTLIST_SEPARATOR, &p)) == NULL)
 			break;
-		hostSub.addr = inet_addr(tok);
+		hostSub.addr = Tinet_addr(tok);
 
 		if ((tok = separate_token(NULL, HOSTLIST_SEPARATOR, &p)) == NULL)
 			break;
@@ -2091,9 +2520,8 @@ void TMainWin::AddHostList(MsgBuf *msg)
 		AddHost(&hostSub, IPMSG_BR_ENTRY|host_status, nickName, groupName);
 	}
 
-	if (continue_cnt || host_cnt < total_num)
-	{
-		msgMng->Send(&msg->hostSub, IPMSG_GETLIST, abs(continue_cnt - (total_num - host_cnt)));
+	if (continue_cnt && continue_cnt >= host_cnt) {
+		msgMng->Send(&msg->hostSub, IPMSG_GETLIST, abs(continue_cnt));
 		if (::SetTimer(hWnd, IPMSG_LISTGETRETRY_TIMER, cfg->ListGetMSec, NULL))
 			entryTimerStatus = IPMSG_LISTGETRETRY_TIMER;
 	}
@@ -2105,28 +2533,24 @@ void TMainWin::AddHostList(MsgBuf *msg)
 }
 
 /*
-	LogÇäJÇ≠
+	Log„ÇíÈñã„Åè
 */
 void TMainWin::LogOpen(void)
 {
-	SHELLEXECUTEINFO	shellExecInfo;
+	SHELLEXECUTEINFO	shellExecInfo = { sizeof(SHELLEXECUTEINFO) };
 
-	memset(&shellExecInfo, 0, sizeof(shellExecInfo));
-	shellExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
 	shellExecInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
 	shellExecInfo.hwnd = NULL;
 	shellExecInfo.lpFile = cfg->LogFile;
 	shellExecInfo.nShow = SW_SHOWNORMAL;
 
-	if (!ShellExecuteEx(&shellExecInfo) || (int)shellExecInfo.hInstApp <= WINEXEC_ERR_MAX)
-	{
-		switch ((int)shellExecInfo.hInstApp)
-		{
+	if (!ShellExecuteExU8(&shellExecInfo) || (int)shellExecInfo.hInstApp <= WINEXEC_ERR_MAX) {
+		switch ((int)shellExecInfo.hInstApp) {
 		case SE_ERR_NOASSOC: case SE_ERR_ASSOCINCOMPLETE:
-			MessageBox(FILEEXTERR_MSGSTR);
+			MessageBoxU8(GetLoadStrU8(IDS_FILEEXTERR));
 			break;
 		default:
-			MessageBox(CANTOPENLOG_MSGSTR);
+			MessageBoxU8(GetLoadStrU8(IDS_CANTOPENLOG));
 			break;
 		}
 	}
@@ -2134,27 +2558,38 @@ void TMainWin::LogOpen(void)
 }
 
 /*
-	é©HostÇÃ Status (dialup mode / absence mode)
+	Ëá™Host„ÅÆ Status (dialup mode / absence mode)
 */
 ULONG TMainWin::HostStatus(void)
 {
-	return	(cfg->DialUpCheck ? IPMSG_DIALUPOPT : 0) | (cfg->AbsenceCheck ? IPMSG_ABSENCEOPT : 0) | (msgMng->IsAvailableTCP() ? IPMSG_FILEATTACHOPT : 0) | (cfg->pubKey.Key() || cfg->smallPubKey.Key() ? IPMSG_ENCRYPTOPT : 0);
+	return	(cfg->DialUpCheck ? IPMSG_DIALUPOPT : 0)
+			| (cfg->AbsenceCheck ? IPMSG_ABSENCEOPT : 0)
+			| (msgMng->IsAvailableTCP() ?
+			  (IPMSG_FILEATTACHOPT | ((cfg->ClipMode & CLIP_ENABLE) ? IPMSG_CLIPBOARDOPT : 0)) : 0)
+			| (GetLocalCapa(cfg) ? IPMSG_ENCRYPTOPT : 0)
+			| IPMSG_CAPUTF8OPT
+			| IPMSG_ENCEXTMSGOPT;
 }
 
 /*
-	IPMSGóp iconèâä˙âª
+	IPMSGÁî® iconÂàùÊúüÂåñ
 */
 void  TMainWin::InitIcon(void)
 {
-	if (*cfg->IconFile == 0 || (hMainIcon = ::ExtractIcon(TApp::hI, cfg->IconFile, 0)) == NULL)
-		hMainIcon = ::LoadIcon(TApp::hI, (LPCSTR)IPMSG_ICON);
-	if (*cfg->RevIconFile == 0 || (hRevIcon = ::ExtractIcon(TApp::hI, cfg->RevIconFile, 0)) == NULL)
-		hRevIcon = ::LoadIcon(TApp::hI, (LPCSTR)RECV_ICON);
+	if (*cfg->IconFile == 0 ||
+		!(hMainIcon = ::ExtractIconW(TApp::GetInstance(), U8toW(cfg->IconFile), 0))) {
+		hMainIcon = ::LoadIcon(TApp::GetInstance(), (LPCSTR)IPMSG_ICON);
+	}
+
+	if (*cfg->RevIconFile == 0 ||
+		!(hRevIcon = ::ExtractIconW(TApp::GetInstance(), U8toW(cfg->RevIconFile), 0))) {
+		hRevIcon = ::LoadIcon(TApp::GetInstance(), (LPCSTR)RECV_ICON);
+	}
 }
 
 /*
-	MainWindow iconÇã≥Ç¶ÇƒÇ†Ç∞ÇÈÅB
-	Ç±ÇÃ routineÇÕ static member function Ç≈Ç†ÇËÅASendDlgÇ»Ç«Ç©ÇÁåƒÇŒÇÍÇÈÅB
+	MainWindow icon„ÇíÊïô„Åà„Å¶„ÅÇ„Åí„Çã„ÄÇ
+	„Åì„ÅÆ routine„ÅØ static member function „Åß„ÅÇ„Çä„ÄÅSendDlg„Å™„Å©„Åã„ÇâÂëº„Å∞„Çå„Çã„ÄÇ
 */
 HICON TMainWin::GetIPMsgIcon(void)
 {
@@ -2162,35 +2597,42 @@ HICON TMainWin::GetIPMsgIcon(void)
 }
 
 /*
-	ListDlg Ç Active or HideÇ…ÅiíPÇ»ÇÈä»à’ÉãÅ[É`ÉìÅj
+	ListDlg „Çí Active or Hide„Å´ÔºàÂçò„Å™„ÇãÁ∞°Êòì„É´„Éº„ÉÅ„É≥Ôºâ
 */
 void TMainWin::ActiveListDlg(TList *list, BOOL active)
 {
-	for (TListDlg *dlg = (TListDlg *)list->TopObj(); dlg != NULL; dlg = (TListDlg *)list->NextObj(dlg))
+	for (TListDlg *dlg = (TListDlg *)list->TopObj(); dlg; dlg = (TListDlg *)list->NextObj(dlg)) {
 		ActiveDlg(dlg, active);
+	}
 }
 
 /*
-	ListDlg Ç Delete Ç∑ÇÈÅiíPÇ»ÇÈä»à’ÉãÅ[É`ÉìÅj
+	ListDlg „Çí Delete „Åô„ÇãÔºàÂçò„Å™„ÇãÁ∞°Êòì„É´„Éº„ÉÅ„É≥Ôºâ
 */
 void TMainWin::DeleteListDlg(TList *list)
 {
 	TListDlg *dlg;
 
-	while ((dlg = (TListDlg *)list->TopObj()) != NULL)
-	{
+	while ((dlg = (TListDlg *)list->TopObj())) {
 		list->DelObj(dlg);
 		delete dlg;
 	}
 }
 
 /*
-	Dlg Ç Active or HideÇ…
+	Dlg „Çí Active or Hide„Å´
 */
 void TMainWin::ActiveDlg(TDlg *dlg, BOOL active)
 {
-	if (dlg->hWnd != 0)
-		active ? dlg->Show(), dlg->SetForegroundWindow() : dlg->Show(SW_HIDE);
+	if (dlg->hWnd != 0) {
+		if (active) {
+			dlg->Show();
+			dlg->SetForegroundWindow();
+		}
+		else {
+			dlg->Show(SW_HIDE);
+		}
+	}
 }
 
 /*
@@ -2200,413 +2642,99 @@ char *TMainWin::GetNickNameEx(void)
 {
 	static char buf[MAX_LISTBUF];
 
-	if (cfg->AbsenceCheck && *cfg->AbsenceHead[cfg->AbsenceChoice])
-		wsprintf(buf, "%s[%s]", *cfg->NickNameStr ? cfg->NickNameStr : msgMng->GetLocalHost()->userName, cfg->AbsenceHead[cfg->AbsenceChoice]);
-	else
-		strcpy(buf, *cfg->NickNameStr ? cfg->NickNameStr : msgMng->GetLocalHost()->userName);
+	if (cfg->AbsenceCheck && *cfg->AbsenceHead[cfg->AbsenceChoice]) {
+		wsprintf(buf, "%s[%s]", *cfg->NickNameStr ? cfg->NickNameStr : msgMng->GetOrgLocalHost()->userName, cfg->AbsenceHead[cfg->AbsenceChoice]);
+	}
+	else {
+		strcpy(buf, *cfg->NickNameStr ? cfg->NickNameStr : msgMng->GetOrgLocalHost()->userName);
+	}
 
 	return	buf;
 }
 
-/* VC4 Ç≈ CryptoAPI Çégópâ¬î\Ç…Ç∑ÇÈ */
-BOOL (WINAPI *pCryptAcquireContext)(HCRYPTPROV *, LPCSTR, LPCSTR, DWORD, DWORD);
-BOOL (WINAPI *pCryptDestroyKey)(HCRYPTKEY);
-BOOL (WINAPI *pCryptGetKeyParam)(HCRYPTKEY, DWORD, BYTE *, DWORD *, DWORD);
-BOOL (WINAPI *pCryptSetKeyParam)(HCRYPTKEY, DWORD, BYTE *, DWORD);
-BOOL (WINAPI *pCryptExportKey)(HCRYPTKEY, HCRYPTKEY, DWORD, DWORD, BYTE *, DWORD *);
-BOOL (WINAPI *pCryptGetUserKey)(HCRYPTPROV, DWORD, HCRYPTKEY *);
-BOOL (WINAPI *pCryptEncrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *, DWORD);
-BOOL (WINAPI *pCryptGenKey)(HCRYPTPROV, ALG_ID, DWORD, HCRYPTKEY *);
-BOOL (WINAPI *pCryptGenRandom)(HCRYPTPROV, DWORD, BYTE *);
-BOOL (WINAPI *pCryptImportKey)(HCRYPTPROV, CONST BYTE *, DWORD, HCRYPTKEY, DWORD, HCRYPTKEY *);
-BOOL (WINAPI *pCryptDecrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *);
-BOOL (WINAPI *pCryptReleaseContext)(HCRYPTPROV, DWORD);
-
-BOOL (WINAPI *pCryptCreateHash)(HCRYPTPROV, ALG_ID, HCRYPTKEY, DWORD, HCRYPTHASH *);
-BOOL (WINAPI *pCryptHashData)(HCRYPTHASH, BYTE *, DWORD, DWORD);
-BOOL (WINAPI *pCryptSignHash)(HCRYPTHASH, DWORD, LPCSTR, DWORD, BYTE *, DWORD *);
-BOOL (WINAPI *pCryptVerifySignature)(HCRYPTHASH, CONST BYTE *, DWORD, HCRYPTKEY, LPCSTR, DWORD);
-BOOL (WINAPI *pCryptProtectData)(DATA_BLOB* pDataIn, LPCWSTR szDataDescr, DATA_BLOB* pOptionalEntropy, PVOID pvReserved, CRYPTPROTECT_PROMPTSTRUCT* pPromptStruct, DWORD dwFlags, DATA_BLOB* pDataOut);
-BOOL (WINAPI *pCryptUnprotectData)(DATA_BLOB* pDataIn, LPWSTR* ppszDataDescr, DATA_BLOB* pOptionalEntropy, PVOID pvReserved, CRYPTPROTECT_PROMPTSTRUCT* pPromptStruct, DWORD dwFlags, DATA_BLOB* pDataOut);
-
-
-BOOL TMainWin::SetupCryptAPI(void)
-{
-	HINSTANCE	advdll;
-
-	cfg->hCsp = cfg->hSmallCsp = NULL;
-
-	if ((advdll = ::LoadLibrary("advapi32.dll")) == NULL)
-		return	GetLastErrorMsg("advapi32"), FALSE;
-
-	pCryptAcquireContext = (BOOL (WINAPI *)(HCRYPTPROV *, LPCSTR, LPCSTR, DWORD, DWORD))::GetProcAddress(advdll, "CryptAcquireContextA");
-	pCryptDestroyKey = (BOOL (WINAPI *)(HCRYPTKEY))::GetProcAddress(advdll, "CryptDestroyKey");
-	pCryptGetKeyParam = (BOOL (WINAPI *)(HCRYPTKEY, DWORD, BYTE *, DWORD *, DWORD))::GetProcAddress(advdll, "CryptGetKeyParam");
-	pCryptSetKeyParam = (BOOL (WINAPI *)(HCRYPTKEY, DWORD, BYTE *, DWORD))::GetProcAddress(advdll, "CryptSetKeyParam");
-	pCryptExportKey = (BOOL (WINAPI *)(HCRYPTKEY, HCRYPTKEY, DWORD, DWORD, BYTE *, DWORD *))::GetProcAddress(advdll, "CryptExportKey");
-	pCryptGetUserKey = (BOOL (WINAPI *)(HCRYPTPROV, DWORD, HCRYPTKEY *))::GetProcAddress(advdll, "CryptGetUserKey");
-	pCryptEncrypt = (BOOL (WINAPI *)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *, DWORD))::GetProcAddress(advdll, "CryptEncrypt");
-	pCryptGenKey = (BOOL (WINAPI *)(HCRYPTPROV, ALG_ID, DWORD, HCRYPTKEY *))::GetProcAddress(advdll, "CryptGenKey");
-	pCryptGenRandom = (BOOL (WINAPI *)(HCRYPTPROV, DWORD, BYTE *))::GetProcAddress(advdll, "CryptGenRandom");
-	pCryptImportKey = (BOOL (WINAPI *)(HCRYPTPROV, CONST BYTE *, DWORD, HCRYPTKEY, DWORD, HCRYPTKEY *))::GetProcAddress(advdll, "CryptImportKey");
-	pCryptDecrypt = (BOOL (WINAPI *)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *))::GetProcAddress(advdll, "CryptDecrypt");
-	pCryptCreateHash = (BOOL (WINAPI *)(HCRYPTPROV, ALG_ID, HCRYPTKEY, DWORD, HCRYPTHASH *))::GetProcAddress(advdll, "CryptCreateHash");
-	pCryptHashData = (BOOL (WINAPI *)(HCRYPTHASH, BYTE *, DWORD, DWORD))::GetProcAddress(advdll, "CryptHashData");
-	pCryptSignHash = (BOOL (WINAPI *)(HCRYPTHASH, DWORD, LPCSTR, DWORD, BYTE *, DWORD *))::GetProcAddress(advdll, "CryptSignHashA");
-	pCryptVerifySignature = (BOOL (WINAPI *)(HCRYPTHASH, CONST BYTE *, DWORD, HCRYPTKEY, LPCSTR, DWORD))::GetProcAddress(advdll, "CryptVerifySignatureA");
-	pCryptReleaseContext = (BOOL (WINAPI *)(HCRYPTPROV, DWORD))::GetProcAddress(advdll, "CryptReleaseContext");
-
-	HINSTANCE	cryptdll;
-	if (cryptdll = ::LoadLibrary("crypt32.dll"))
-	{
-		pCryptProtectData = (BOOL (WINAPI *)(DATA_BLOB* pDataIn, LPCWSTR szDataDescr, DATA_BLOB* pOptionalEntropy, PVOID pvReserved, CRYPTPROTECT_PROMPTSTRUCT* pPromptStruct, DWORD dwFlags, DATA_BLOB* pDataOut))::GetProcAddress(cryptdll, "CryptProtectData");
-		pCryptUnprotectData = (BOOL (WINAPI *)(DATA_BLOB* pDataIn, LPWSTR* ppszDataDescr, DATA_BLOB* pOptionalEntropy, PVOID pvReserved, CRYPTPROTECT_PROMPTSTRUCT* pPromptStruct, DWORD dwFlags, DATA_BLOB* pDataOut))::GetProcAddress(cryptdll, "CryptUnprotectData");
-	}
-	if (pCryptProtectData == NULL && cfg->privEncryptType == PRIV_BLOB_DPAPI)
-		cfg->privEncryptType = PRIV_BLOB_RAW;
-
-	if (pCryptAcquireContext == NULL)
-		return	GetLastErrorMsg("CryptAcquireContext"), FALSE;
-
-	SetupCryptAPICore();
-
-// ãNìÆíºå„Ç…ÅAÇ‹ÇÍÇ…ÉRÉPÇÈä¬ã´Ç™Ç†ÇÈÇÁÇµÇ¢ÇÃÇ≈ÅAÇÌÇ∏Ç©Ç…ÉäÉgÉâÉC...
-#define MAX_RETRY	3
-	int	cnt = 0;
-	while (cfg->hCsp && cfg->pubKey.Key() == NULL || cfg->hSmallCsp && cfg->smallPubKey.Key() == NULL)
-	{
-		if (++cnt > MAX_RETRY)
-			break;
-		if (cfg->hCsp)
-			pCryptReleaseContext(cfg->hCsp, 0), cfg->hCsp = NULL;
-		if (cfg->hSmallCsp)
-			pCryptReleaseContext(cfg->hSmallCsp, 0), cfg->hSmallCsp = NULL;
-		::Sleep(1000);
-		SetupCryptAPICore(cnt == MAX_RETRY ? KEY_DIAG : 0);
-	}
-	if (cnt > MAX_RETRY || cfg->pubKey.Key() == NULL && cfg->smallPubKey.Key() == NULL)
-	{
-		if (MessageBox("RSA failed. Create New RSA key?", "msg", MB_OKCANCEL) == IDOK)
-			SetupCryptAPICore(KEY_REBUILD|KEY_DIAG);
-	}
-
-#if 0
-	if (cfg->pubKey.Key())
-	{
-		char	hash[MAX_NAMEBUF];
-		MakeHash(cfg->pubKey.Key(), cfg->pubKey.KeyLen(), hash);
-		int	len = strlen(msgMng->GetLocalHost()->userName);
-		wsprintf(msgMng->GetLocalHost()->userName + min(len, 32), "@%s", hash);
-	}
-#endif
-
-	return	cfg->pubKey.Key() || cfg->smallPubKey.Key();
-}
-
-BOOL TMainWin::SetupCryptAPICore(int ctl_flg)
-{
-	BYTE	data[MAX_BUF];
-	int		len = sizeof(data);
-
-// RSA åÆÇÃê∂ê¨
-	SetupRSAKey(1024, ctl_flg);
-	SetupRSAKey(512, ctl_flg);
-
-// Self Check 1024bit
-	if (cfg->pubKey.Key()) {
-		BOOL		ret = FALSE;
-		HCRYPTKEY	hExKey = 0;
-
-		cfg->pubKey.KeyBlob(data, sizeof(data), &len);
-		if (pCryptImportKey(cfg->hCsp, data, len, 0, 0, &hExKey)) {
-			len = 128/8;
-			if (pCryptEncrypt(hExKey, 0, TRUE, 0, data, (DWORD *)&len, MAX_BUF))
-				ret = TRUE;
-			else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptEncrypt test1024");
-			pCryptDestroyKey(hExKey);
-		}
-		else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptImportKey test1024");
-
-		if (ret) {
-			ret = FALSE;
-			if (pCryptDecrypt(cfg->hPrivKey, 0, TRUE, 0, (BYTE *)data, (DWORD *)&len))
-				ret = TRUE;
-			else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptDecrypt test1024");
-		}
-
-		if (ret == FALSE)
-			cfg->pubKey.UnSet();
-	}
-
-// Self Check 512bit
-	if (cfg->smallPubKey.Key()) {
-		BOOL		ret = FALSE;
-		BYTE		tmp[MAX_BUF];
-		DWORD		tmplen = MAX_BUF / 2;
-		HCRYPTKEY	hKey = 0, hExKey = 0;
-
-		cfg->smallPubKey.KeyBlob(data, sizeof(data), &len);
-		if (pCryptImportKey(cfg->hSmallCsp, data, len, 0, 0, &hExKey)) {
-			if (pCryptGenKey(cfg->hSmallCsp, CALG_RC2, CRYPT_EXPORTABLE, &hKey)) {
-				pCryptExportKey(hKey, hExKey, SIMPLEBLOB, 0, NULL, (DWORD *)&len);
-				if (pCryptExportKey(hKey, hExKey, SIMPLEBLOB, 0, data, (DWORD *)&len)) {
-					if (pCryptEncrypt(hKey, 0, TRUE, 0, tmp, &tmplen, MAX_BUF))
-						ret = TRUE;
-					else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptEncrypt test512");
-				}
-				else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptExportKey test512");
-				pCryptDestroyKey(hKey);
-			}
-			else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptGenKey test512");
-			pCryptDestroyKey(hExKey);
-		}
-		else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptImportKey test512");
-
-		if (ret) {
-			ret = FALSE;
-			if (pCryptImportKey(cfg->hSmallCsp, data, len, cfg->hSmallPrivKey, 0, &hKey)) {
-				if (pCryptDecrypt(hKey, 0, TRUE, 0, (BYTE *)tmp, (DWORD *)&tmplen))
-					ret = TRUE;
-				else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptDecrypt test512");
-				pCryptDestroyKey(hKey);
-			}
-			else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptImportKey test512");
-		}
-
-		if (ret == FALSE)
-			cfg->smallPubKey.UnSet();
-	}
-
-	if (cfg->pubKey.Key() == NULL && cfg->hPrivKey)
-		pCryptDestroyKey(cfg->hPrivKey), cfg->hPrivKey = NULL;
-	if (cfg->smallPubKey.Key() == NULL && cfg->hSmallPrivKey)
-		pCryptDestroyKey(cfg->hSmallPrivKey), cfg->hSmallPrivKey = NULL;
-
-	return	cfg->pubKey.Key() || cfg->smallPubKey.Key();
-}
-
-BOOL TMainWin::SetupRSAKey(int bitLen, int ctl_flg)
-{
-	BOOL		isSmall = bitLen == 512 ? TRUE : FALSE;
-	BYTE		data[MAX_BUF];
-	char		*contName = (char *)data;
-	int			len = sizeof(data);
-	HCRYPTPROV&	hCsp = isSmall ? cfg->hSmallCsp : cfg->hCsp;
-	HCRYPTKEY&	hPrivKey = isSmall ? cfg->hSmallPrivKey : cfg->hPrivKey;
-	PubKey&		pubKey = isSmall ? cfg->smallPubKey : cfg->pubKey;
-	const char	*csp_name = isSmall ? MS_DEF_PROV : MS_ENHANCED_PROV;
-
-	int	cap = isSmall ? IPMSG_RSA_512|IPMSG_RC2_40 : IPMSG_RSA_1024|IPMSG_BLOWFISH_128;
-	int	SmallAcqFlags[] = { CRYPT_MACHINE_KEYSET, 0, CRYPT_NEWKEYSET|CRYPT_MACHINE_KEYSET, CRYPT_NEWKEYSET, -1 };
-	int	BigAcqFlags[] = { CRYPT_MACHINE_KEYSET, CRYPT_NEWKEYSET|CRYPT_MACHINE_KEYSET, -1 };
-	int	*AcqFlgs = isSmall ? SmallAcqFlags : BigAcqFlags;
-
-	wsprintf(contName, "ipmsg.rsa%d.%s", bitLen, msgMng->GetLocalHost()->userName);
-
-// rebuld éûÇ…ÇÕÅAéñëOÇ…åˆäJåÆÇè¡ãé
-	if ((ctl_flg & KEY_REBUILD) && hCsp && pubKey.Key() == NULL)
-	{
-		pCryptReleaseContext(hCsp, 0), hCsp = NULL;
-		if (!pCryptAcquireContext(&hCsp, contName, csp_name, PROV_RSA_FULL, CRYPT_DELETEKEYSET|CRYPT_MACHINE_KEYSET))
-			if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptAcquireContext(destroy)");
-		pCryptAcquireContext(&hCsp, contName, csp_name, PROV_RSA_FULL, CRYPT_DELETEKEYSET);
-	}
-
-// open key cotainer
-	for (int i=0; AcqFlgs[i] != -1; i++)
-	{
-		hCsp = NULL;
-		if (pCryptAcquireContext(&hCsp, contName, csp_name, PROV_RSA_FULL, AcqFlgs[i]))
-			break;
-	}
-	if (hCsp == NULL)
-	{
-		if (isSmall && (ctl_flg & KEY_DIAG))
-			GetLastErrorMsg("CryptAcquireContext");
-		return	FALSE;
-	}
-
-// ÉvÉâÉCÉxÅ[ÉgåÆÇimport (only 1024bit)
-	if (!isSmall && cfg->privBlob)
-	{
-		if (LoadPrivBlob(data, &len) && !pCryptImportKey(hCsp, data, len, 0, CRYPT_EXPORTABLE, &hPrivKey))
-		{	// import is fail...
-			if (ctl_flg & KEY_DIAG)
-				GetLastErrorMsg("CryptImportKey(blob)");
-			// ÉRÉPÇΩèÍçáÅAçƒAcquireÇµÇ»Ç¢Ç∆ïõçÏópÇ™écÇÈÇ±Ç∆Ç™Ç†ÇÈ...
-			pCryptReleaseContext(hCsp, 0), hCsp = NULL;
-			pCryptAcquireContext(&hCsp, contName, csp_name, PROV_RSA_FULL, CRYPT_MACHINE_KEYSET);
-		}
-		if (hPrivKey == NULL)
-		{
-			if (cfg->privEncryptType == PRIV_BLOB_USER && cfg->privEncryptSeed)
-			{
-				TaskBar(NIM_DELETE);
-				::ExitProcess(0xffffffff);		// ÉpÉXÉèÅ[ÉhÇ™àÍívÇµÇ»Ç¢èÍçáÅAë¶èIóπ
-			}
-			delete [] cfg->privBlob;
-			cfg->privBlob = NULL;
-		}
-	}
-
-// èââÒ or 512bit åÆÇÃèÍçáÇÕÅAhCsp Ç©ÇÁÉvÉâÉCÉxÅ[ÉgåÆÉnÉìÉhÉãÇéÊìæ
-	if (hPrivKey == NULL)
-	{
-		if (!pCryptGetUserKey(hCsp, AT_KEYEXCHANGE, &hPrivKey)
-		&& !pCryptGenKey(hCsp, CALG_RSA_KEYX, CRYPT_EXPORTABLE, &hPrivKey))
-			if (ctl_flg & KEY_DIAG)
-				GetLastErrorMsg("CryptGenKey");
-	}
-
-// åˆäJåÆÇ export
-	if (pCryptExportKey(hPrivKey, 0, PUBLICKEYBLOB, 0, data, (DWORD *)&len))
-		pubKey.SetByBlob(data, cap);
-	else if (ctl_flg & KEY_DIAG) GetLastErrorMsg("CryptExportKey");
-
-// ÉvÉâÉCÉxÅ[ÉgåÆÇï€ë∂
-	if (!isSmall && cfg->privBlob == NULL && hPrivKey)
-	{
-		len = sizeof(data);
-		if (pCryptExportKey(hPrivKey, 0, PRIVATEKEYBLOB, 0, data, (DWORD *)&len))
-			StorePrivBlob(data, len);
-	}
-	return	TRUE;
-}
-
-BOOL TMainWin::LoadPrivBlob(BYTE *rawBlob, int *rawBlobLen)
-{
-	if (cfg->privBlob == NULL)
-		return	FALSE;
-
-	BYTE	key[MAX_BUF];
-
-	if (cfg->privEncryptType == PRIV_BLOB_RAW)
-	{
-		memcpy(rawBlob, cfg->privBlob, *rawBlobLen = cfg->privBlobLen);
-		return	TRUE;
-	}
-	else if (cfg->privEncryptType == PRIV_BLOB_USER)
-	{
-		if (cfg->privEncryptSeed == NULL)
-			return	FALSE;
-		while (1)
-		{
-			TPasswordDlg	dlg((char *)key, this);
-			if (dlg.Exec() == FALSE)
-				return	FALSE;
-			CBlowFish	bl(key, strlen((char *)key));
-			if (bl.Decrypt(cfg->privEncryptSeed, key, cfg->privEncryptSeedLen) == PRIV_SEED_LEN && memcmp(key, PRIV_SEED_HEADER, PRIV_SEED_HEADER_LEN) == 0)
-				break;
-		}
-	}
-	else if (cfg->privEncryptType == PRIV_BLOB_DPAPI)
-	{
-		if (cfg->privEncryptSeed == NULL)
-			return	FALSE;
-		DATA_BLOB	in = { cfg->privEncryptSeedLen, cfg->privEncryptSeed }, out;
-		if (pCryptUnprotectData(&in, 0, 0, 0, 0, CRYPTPROTECT_LOCAL_MACHINE|CRYPTPROTECT_UI_FORBIDDEN, &out) == FALSE)
-			return	FALSE;
-		memcpy(key, out.pbData, out.cbData);
-		::LocalFree(out.pbData);
-		if (out.cbData != PRIV_SEED_LEN)
-			return	FALSE;
-	}
-	else return	FALSE;
-
-	CBlowFish	bl(key + PRIV_SEED_HEADER_LEN, 128/8);
-	return (*rawBlobLen = bl.Decrypt(cfg->privBlob, rawBlob, cfg->privBlobLen)) != 0;
-}
-
-BOOL TMainWin::StorePrivBlob(BYTE *rawBlob, int rawBlobLen)
-{
-	delete	cfg->privBlob;
-	cfg->privBlob = NULL;
-	delete	cfg->privEncryptSeed;
-	cfg->privEncryptSeed = NULL;
-	cfg->privBlobLen = cfg->privEncryptSeedLen = 0;
-
-	BYTE	data[MAX_BUF], *encodeBlob = data;
-
-	if (cfg->privEncryptType == PRIV_BLOB_RAW)
-	{
-		encodeBlob = rawBlob;
-		cfg->privBlobLen = rawBlobLen;
-	}
-	else {
-		BYTE	seed[PRIV_SEED_LEN], *seedCore = seed + PRIV_SEED_HEADER_LEN;
-		// seed ÇÃçÏê¨
-		memcpy(seed, PRIV_SEED_HEADER, PRIV_SEED_HEADER_LEN);
-		pCryptGenRandom(cfg->hCsp ? cfg->hCsp : cfg->hSmallCsp, 128/8, seedCore);
-
-		if (cfg->privEncryptType == PRIV_BLOB_USER)
-		{
-			TPasswordDlg	dlg((char *)data, this);
-			if (dlg.Exec() == FALSE)
-				return	FALSE;
-			// seed ÇÃà√çÜâª
-			CBlowFish	bl(data, strlen((char *)data));
-			cfg->privEncryptSeedLen = bl.Encrypt(seed, data, PRIV_SEED_LEN);
-			cfg->privEncryptSeed = new BYTE [cfg->privEncryptSeedLen];
-			memcpy(cfg->privEncryptSeed, data, cfg->privEncryptSeedLen);
-		}
-		else if (cfg->privEncryptType == PRIV_BLOB_DPAPI)
-		{
-			// seed ÇÃà√çÜâª
-			DATA_BLOB in = { PRIV_SEED_LEN, seed }, out;
-			if (!pCryptProtectData(&in, L"ipmsg", 0, 0, 0, CRYPTPROTECT_LOCAL_MACHINE|CRYPTPROTECT_UI_FORBIDDEN, &out))
-				return	FALSE;
-			cfg->privEncryptSeed = new BYTE [cfg->privEncryptSeedLen = out.cbData];
-			memcpy(cfg->privEncryptSeed, out.pbData, out.cbData);
-			::LocalFree(out.pbData);
-		}
-		else return	FALSE;
-		// seed Ç…ÇÊÇÈÅAà√çÜâªblob ÇÃçÏê¨
-		CBlowFish	bl(seedCore, 128/8);
-		cfg->privBlobLen = bl.Encrypt(rawBlob, encodeBlob, rawBlobLen);
-	}
-
-	cfg->privBlob = new BYTE [cfg->privBlobLen];
-	memcpy(cfg->privBlob, encodeBlob, cfg->privBlobLen);
-	cfg->WriteRegistry(CFG_CRYPT);
-	return	TRUE;
-}
-
 void TMainWin::ControlIME(TWin *win, BOOL open)
 {
-	HWND	targetWnd = (win && win->hWnd) ? win->GetDlgItem(SEND_EDIT) : hWnd;
+//	HWND	targetWnd = (win && win->hWnd) ? win->GetDlgItem(SEND_EDIT) : hWnd;
+//
+//	if (!targetWnd) targetWnd = hWnd;
+//
+//	if (win && win->hWnd && !open)
+//		::SetFocus(targetWnd);		// ATOKÊÆãÂÉè Êö´ÂÆöÂØæÁ≠ñ...
 
-	if (win && win->hWnd && open == FALSE)
-		::SetFocus(targetWnd);		// ATOKécëú ébíËëŒçÙ...
+	if (!cfg->ControlIME) return;
 
-	if (cfg->ControlIME == FALSE)
-		return;
-
-	if (open == FALSE)
-	{
-		for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg != NULL; sendDlg = (TSendDlg *)sendList.NextObj(sendDlg))
-			if (sendDlg != win && sendDlg->IsSending() != TRUE)
-				return;
+	if (!open) {
+		for (TSendDlg *sendDlg = (TSendDlg *)sendList.TopObj(); sendDlg;
+				sendDlg = (TSendDlg *)sendList.NextObj(sendDlg)) {
+			if (sendDlg != win && !sendDlg->IsSending()) return;
+		}
 	}
 
-//	SetImeOpenStatus(targetWnd, open);
-	if (GetImeOpenStatus(targetWnd) != open)
-		SetImeOpenStatus(targetWnd, open);
+	if (GetImeOpenStatus(hWnd) != open) {
+		SetImeOpenStatus(hWnd, open);
+	}
+}
+
+void TMainWin::MakeBrListEx()
+{
+	brListEx.Reset();
+
+	int			num = 0, i, j;
+	AddrInfo	*info = cfg->ExtendBroadcast > 0 ? GetIPAddrs(TRUE, &num) : NULL;
+	TBrObj		*obj;
+
+	if (info && num > 0) {
+		for (i=num-1; i >= 0; i--) brListEx.SetHostRaw(NULL, info[i].br_addr);
+	}
+
+	if ((cfg->ExtendBroadcast & 0x1) == 0 || !info || num == 0) {
+		brListEx.SetHostRaw(NULL, ~0);
+	}
+
+	for (obj=cfg->brList.Top(); obj; obj=cfg->brList.Next(obj)) {
+		if (obj->addr == 0) {
+//			if (obj->Addr(TRUE) == 0) {
+//				MessageBox(Fmt("Can't resolve <%s> in broadcast list", obj->host), "IPMsg");
+				continue;
+//			}
+		}
+		for (j=0; j < num; j++) {
+			if (obj->Addr() == info[j].br_addr) break;
+		}
+		if (j == num) {
+			brListEx.SetHostRaw(NULL, obj->Addr());
+		}
+	}
+//	for (obj=brListEx.Top(); obj; obj=brListEx.Next(obj)) {
+//		Debug("%s\n", ::Tinet_ntoa(*(struct in_addr *)&obj->addr));
+//	}
+	delete [] info;
 }
 
 /*
-	MainWindow Çã≥Ç¶ÇƒÇ†Ç∞ÇÈÅB
+BOOL TMainDlg::RunAsAdmin(DWORD flg)
+{
+	SHELLEXECUTEINFO	sei = { sizeof(SHELLEXECUTEINFO) };
+	char				buf[MAX_PATH];
+
+	char	self[MAX_PATH];
+	GetModuleFileName(NULL, self, sizeof(self));
+	ShellExecute(hWnd, "runas", self, "/runas", "", SW_NORMAL);
+
+	sei.lpVerb = "runas";
+	sei.lpFile = self;
+	sei.lpDirectory = "";
+	sei.nShow = SW_NORMAL;
+	sei.lpParameters = "/runas";
+	return	::ShellExecuteEx(&sei);
+}
+*/
+
+/*
+	MainWindow „ÇíÊïô„Åà„Å¶„ÅÇ„Åí„Çã„ÄÇ
 */
 HWND GetMainWnd(void)
 {
 	return	hMainWnd;
 }
-
-/*
-	Versionï∂éöóÒ
-*/
-char *GetVerionStr(void)
-{
-	return	strstr(mainwin_id, "Ver");
-}
-
 

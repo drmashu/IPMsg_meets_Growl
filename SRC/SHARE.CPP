@@ -1,27 +1,26 @@
-static char *share_id = 
-	"@(#)Copyright (C) H.Shirouzu 2002   share.cpp	Ver2.00";
+Ôªøstatic char *share_id = 
+	"@(#)Copyright (C) H.Shirouzu 2002-2012   share.cpp	Ver3.40";
 /* ========================================================================
 	Project  Name			: IP Messenger for Win32
 	Module Name				: File Share
 	Create					: 2002-04-14(Sun)
-	Update					: 2002-11-03(Sun)
+	Update					: 2012-04-02(Mon)
 	Copyright				: H.Shirouzu
 	Reference				: 
 	======================================================================== */
 
-#include "tlib.h"
 #include "resource.h"
 #include "ipmsg.h"
-#include "msgstr.h"
+#include <stddef.h>
 
-#define BIG_ALLOC 5
+#define BIG_ALLOC 100
 
 /*
-	åˆäJÉtÉ@ÉCÉãä«óù
+	ÂÖ¨Èñã„Éï„Ç°„Ç§„É´ÁÆ°ÁêÜ
 */
 ShareMng::ShareMng(Cfg *_cfg)
 {
-	top = (ShareInfo *)&_top;	// î‘ï∫
+	top = (ShareInfo *)&_top;	// Áï™ÂÖµ
 	top->prior = top->next = top;
 	cfg = _cfg;
 	statDlg = NULL;
@@ -29,7 +28,7 @@ ShareMng::ShareMng(Cfg *_cfg)
 
 ShareInfo *ShareMng::CreateShare(int packetNo)
 {
-	if (Search(packetNo) != NULL)
+	if (Search(packetNo))
 		return	FALSE;
 
 	ShareInfo *info = new ShareInfo(packetNo);
@@ -38,22 +37,39 @@ ShareInfo *ShareMng::CreateShare(int packetNo)
 	return	info;
 }
 
-BOOL ShareMng::AddFileShare(ShareInfo *info, char *fname)
+BOOL ShareMng::AddShareCore(ShareInfo *shareInfo, FileInfo	*fileInfo)
 {
-	for (int cnt=0; cnt < info->fileCnt; cnt++)
-		if (strcmp(fname, info->fileInfo[cnt]->Fname()) == 0)
-			return	FALSE;
+	if (!fileInfo) return FALSE;
 
-	FileInfo	*fileInfo = new FileInfo;
-	if (SetFileInfo(fname, fileInfo) == FALSE)
-		return	FALSE;
-
-	if ((info->fileCnt % BIG_ALLOC) == 0)
-		info->fileInfo = (FileInfo **)realloc(info->fileInfo, (info->fileCnt + BIG_ALLOC) * sizeof(FileInfo *));
-	info->fileInfo[info->fileCnt] = fileInfo;
-	info->fileCnt++;
+	if ((shareInfo->fileCnt % BIG_ALLOC) == 0)
+		shareInfo->fileInfo = (FileInfo **)realloc(shareInfo->fileInfo, (shareInfo->fileCnt + BIG_ALLOC) * sizeof(FileInfo *));
+	shareInfo->fileInfo[shareInfo->fileCnt] = fileInfo;
+	shareInfo->fileCnt++;
 
 	return	TRUE;
+}
+
+BOOL ShareMng::AddFileShare(ShareInfo *shareInfo, char *fname)
+{
+	for (int i=0; i < shareInfo->fileCnt; i++) {
+		if (strcmp(fname, shareInfo->fileInfo[i]->Fname()) == 0)
+			return	FALSE;
+	}
+	return	AddShareCore(shareInfo, SetFileInfo(fname));
+}
+
+BOOL ShareMng::AddMemShare(ShareInfo *shareInfo, char *dummy_name, BYTE *data, int size, int pos)
+{
+	FileInfo	*info = new FileInfo;
+	if (!info) return FALSE;
+
+	info->SetAttr(IPMSG_FILE_CLIPBOARD);
+	info->SetFname(dummy_name);
+	info->SetMemData(data, size);
+	info->SetMtime(Time());
+	info->SetPos(pos);
+
+	return	AddShareCore(shareInfo, info);
 }
 
 BOOL ShareMng::DelFileShare(ShareInfo *info, int fileNo)
@@ -67,12 +83,13 @@ BOOL ShareMng::DelFileShare(ShareInfo *info, int fileNo)
 	return	TRUE;
 }
 
-BOOL ShareMng::SetFileInfo(char *fname, FileInfo *info)
+FileInfo *ShareMng::SetFileInfo(char *fname)
 {
-	WIN32_FIND_DATA	fdat;
+	WIN32_FIND_DATA_U8	fdat;
 
-	if (GetFileInfomation(fname, &fdat) != TRUE)
-		return	FALSE;
+	if (!GetFileInfomationU8(fname, &fdat))	return	FALSE;
+
+	FileInfo	*info = new FileInfo;
 
 	UINT	attr = (fdat.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? IPMSG_FILE_DIR : IPMSG_FILE_REGULAR;
 	attr |= (fdat.dwFileAttributes & FILE_ATTRIBUTE_READONLY) ? IPMSG_FILE_RONLYOPT : 0;
@@ -82,15 +99,17 @@ BOOL ShareMng::SetFileInfo(char *fname, FileInfo *info)
 	if (GET_MODE(info->Attr()) == IPMSG_FILE_DIR)
 	{
 		info->SetSize(0);
-		strncpyz(cfg->lastOpenDir, fname, MAX_PATH);
+		strncpyz(cfg->lastOpenDir, fname, MAX_PATH_U8);
 	}
 	else {
 		info->SetSize((_int64)fdat.nFileSizeHigh << 32 | fdat.nFileSizeLow);
 		PathToDir(fname, cfg->lastOpenDir);
 	}
 	info->SetMtime(FileTime2UnixTime(&fdat.ftLastWriteTime));
+	info->SetCrtime(FileTime2UnixTime(&fdat.ftCreationTime));
+	info->SetAtime(FileTime2UnixTime(&fdat.ftLastAccessTime));
 
-	return	TRUE;
+	return	info;
 }
 
 BOOL ShareMng::AddHostShare(ShareInfo *info, SendEntry *entry, int entryNum)
@@ -99,18 +118,22 @@ BOOL ShareMng::AddHostShare(ShareInfo *info, SendEntry *entry, int entryNum)
 	info->transStat = new char [info->hostCnt * info->fileCnt];
 	memset(info->transStat, TRANS_INIT, info->hostCnt * info->fileCnt);
 
-	for (int cnt=0; cnt < entryNum; cnt++)
+	for (int i=0; i < entryNum; i++)
 	{
-		info->host[cnt] = (Host *)cfg->fileHosts.GetHostByNameAddr(&entry[cnt].Host()->hostSub);
-		if (info->host[cnt] == NULL)
+		info->host[i] = (Host *)cfg->fileHosts.GetHostByNameAddr(&entry[i].Host()->hostSub);
+		if (info->host[i] == NULL)
 		{
-			info->host[cnt] = new Host;
-			info->host[cnt]->hostSub = entry[cnt].Host()->hostSub;
-			strncpyz(info->host[cnt]->nickName, entry[cnt].Host()->nickName, MAX_NAMEBUF);
-			cfg->fileHosts.AddHost(info->host[cnt]);
+			info->host[i] = new Host;
+			info->host[i]->hostSub = entry[i].Host()->hostSub;
+			info->host[i]->hostStatus = entry[i].Host()->hostStatus;
+			info->host[i]->updateTime = entry[i].Host()->updateTime;
+			info->host[i]->priority = entry[i].Host()->priority;
+			strncpyz(info->host[i]->nickName, entry[i].Host()->nickName, MAX_NAMEBUF);
+			cfg->fileHosts.AddHost(info->host[i]);
 		}
-		else info->host[cnt]->RefCnt(1);
+		else info->host[i]->RefCnt(1);
 	}
+
 	SYSTEMTIME	st;
 	::GetSystemTime(&st);
 	::SystemTimeToFileTime(&st, &info->attachTime);
@@ -135,26 +158,26 @@ BOOL ShareMng::EndHostShare(int packetNo, HostSub *hostSub, FileInfo *fileInfo, 
 	if (info == NULL)
 		return	FALSE;
 
-	for (int cnt=0; cnt < info->hostCnt; cnt++)
+	for (int i=0; i < info->hostCnt; i++)
 	{
-		if (IsSameHostEx(&info->host[cnt]->hostSub, hostSub))
+		if (IsSameHostEx(&info->host[i]->hostSub, hostSub))
 		{
 			if (fileInfo)
 			{
-				info->transStat[info->fileCnt * cnt + GetFileInfoNo(info, fileInfo)] = done ? TRANS_DONE : TRANS_INIT;
-				if (done == FALSE)
+				info->transStat[info->fileCnt * i + GetFileInfoNo(info, fileInfo)] = done ? TRANS_DONE : TRANS_INIT;
+				if (!done)
 					return	statDlg->Refresh(), TRUE;
-				for (int cnt2=0; cnt2 < info->fileCnt; cnt2++)
-					if (info->transStat[info->fileCnt * cnt + cnt2] != TRANS_DONE)
+				for (int j=0; j < info->fileCnt; j++)
+					if (info->transStat[info->fileCnt * i + j] != TRANS_DONE)
 						return	statDlg->Refresh(), TRUE;
 			}
-			if (info->host[cnt]->RefCnt(-1) == 0)
+			if (info->host[i]->RefCnt(-1) == 0)
 			{
-				cfg->fileHosts.DelHost(info->host[cnt]);
-				delete info->host[cnt];
+				cfg->fileHosts.DelHost(info->host[i]);
+				delete info->host[i];
 			}
-			memmove(info->host + cnt, info->host + cnt + 1, (--info->hostCnt - cnt) * sizeof(Host *));
-			memmove(info->transStat + info->fileCnt * cnt, info->transStat + info->fileCnt * (cnt + 1), (info->hostCnt - cnt) * info->fileCnt);
+			memmove(info->host + i, info->host + i + 1, (--info->hostCnt - i) * sizeof(Host *));
+			memmove(info->transStat + info->fileCnt * i, info->transStat + info->fileCnt * (i + 1), (info->hostCnt - i) * info->fileCnt);
 			if (info->hostCnt == 0)
 				DestroyShare(info);
 			return	statDlg->Refresh(), TRUE;
@@ -204,20 +227,21 @@ BOOL ShareMng::GetShareCntInfo(ShareCntInfo *cntInfo, ShareInfo *shareInfo)
 		{
 			cntInfo->packetCnt++;
 			cntInfo->hostCnt += info->hostCnt;
-			for (int cnt=info->fileCnt * info->hostCnt -1; cnt >= 0; cnt--)
+			int i;
+			for (i=info->fileCnt * info->hostCnt -1; i >= 0; i--)
 			{
 				cntInfo->fileCnt++;
-				switch (info->transStat[cnt]) {
+				switch (info->transStat[i]) {
 				case TRANS_INIT: break;
 				case TRANS_BUSY: cntInfo->transferCnt++;	break;
 				case TRANS_DONE: cntInfo->doneCnt++;		break;
 				}
 			}
-			for (cnt=0; cnt < info->fileCnt; cnt++)
+			for (i=0; i < info->fileCnt; i++)
 			{
-				if (GET_MODE(info->fileInfo[cnt]->Attr()) == IPMSG_FILE_DIR)
+				if (GET_MODE(info->fileInfo[i]->Attr()) == IPMSG_FILE_DIR)
 					cntInfo->dirCnt++;
-				cntInfo->totalSize += info->fileInfo[cnt]->Size();
+				cntInfo->totalSize += info->fileInfo[i]->Size();
 			}
 		}
 		if (shareInfo)
@@ -229,8 +253,8 @@ BOOL ShareMng::GetShareCntInfo(ShareCntInfo *cntInfo, ShareInfo *shareInfo)
 
 BOOL ShareMng::GetAcceptableFileInfo(ConnectInfo *info, char *buf, AcceptFileInfo *fileInfo)
 {
-	// ñ{ìñÇÕÇ±ÇÒÇ»Ç∆Ç±ÇÎÇ≈ÉfÉRÅ[ÉhÇπÇ∏ÅAmsgmng Ç…Ç‚ÇÁÇπÇÈÇ◊Ç´ÇæÇ™...
-	char		*tok, *p;
+	// Êú¨ÂΩì„ÅØ„Åì„Çì„Å™„Å®„Åì„Çç„Åß„Éá„Ç≥„Éº„Éâ„Åõ„Åö„ÄÅmsgmng „Å´„ÇÑ„Çâ„Åõ„Çã„Åπ„Åç„Å†„Åå...
+	char		*tok, *p, *user_name, *host_name;
 	int			targetID;
 	ShareInfo	*shareInfo;
 	HostSub		hostSub = { "", "", info->addr, info->port };
@@ -241,17 +265,24 @@ BOOL ShareMng::GetAcceptableFileInfo(ConnectInfo *info, char *buf, AcceptFileInf
 	if ((tok = separate_token(NULL, ':', &p)) == NULL)	// packet no
 		return	FALSE;
 
-	if ((tok = separate_token(NULL, ':', &p)) == NULL)
+	if ((user_name = separate_token(NULL, ':', &p)) == NULL)
 		return	FALSE;
-	strncpyz(hostSub.userName, tok, MAX_NAMEBUF);
 
-	if ((tok = separate_token(NULL, ':', &p)) == NULL)
+	if ((host_name = separate_token(NULL, ':', &p)) == NULL)
 		return	FALSE;
-	strncpyz(hostSub.hostName, tok, MAX_NAMEBUF);
 
 	if ((tok = separate_token(NULL, ':', &p)) == NULL)	// command
 		return	FALSE;
 	fileInfo->command = atoi(tok);
+
+	if (fileInfo->command & IPMSG_UTF8OPT) {
+		strncpyz(hostSub.userName, user_name, MAX_NAMEBUF);
+		strncpyz(hostSub.hostName, host_name, MAX_NAMEBUF);
+	}
+	else {
+		strncpyz(hostSub.userName, AtoU8(user_name), MAX_NAMEBUF);
+		strncpyz(hostSub.hostName, AtoU8(host_name), MAX_NAMEBUF);
+	}
 
 	if ((tok = separate_token(NULL, ':', &p)) == NULL)
 		return	FALSE;
@@ -293,8 +324,8 @@ BOOL ShareMng::GetAcceptableFileInfo(ConnectInfo *info, char *buf, AcceptFileInf
 		{
 			fileInfo->fileInfo = shareInfo->fileInfo[file_cnt];
 			if (shareInfo->transStat[shareInfo->fileCnt * host_cnt + file_cnt] != TRANS_INIT)
-				return	FALSE;	// download çœÇ›Åior ç≈íÜÅj
-			if (GET_MODE(fileInfo->command) != IPMSG_GETDIRFILES && GET_MODE(fileInfo->fileInfo->Attr()) == IPMSG_FILE_DIR)		// dir Ç…ëŒÇµÇƒ IPMSG_GETDIRFILES à»äOÇÕîFÇﬂÇ»Ç¢
+				return	FALSE;	// download Ê∏à„ÅøÔºàor ÊúÄ‰∏≠Ôºâ
+			if (GET_MODE(fileInfo->command) != IPMSG_GETDIRFILES && GET_MODE(fileInfo->fileInfo->Attr()) == IPMSG_FILE_DIR)		// dir „Å´ÂØæ„Åó„Å¶ IPMSG_GETDIRFILES ‰ª•Â§ñ„ÅØË™ç„ÇÅ„Å™„ÅÑ
 				return	FALSE;
 			fileInfo->attachTime = shareInfo->attachTime;
 			shareInfo->transStat[shareInfo->fileCnt * host_cnt + file_cnt] = TRANS_BUSY;
@@ -303,6 +334,36 @@ BOOL ShareMng::GetAcceptableFileInfo(ConnectInfo *info, char *buf, AcceptFileInf
 		}
 	}
 	return	FALSE;
+}
+
+void ShareMng::Cleanup()
+{
+	int			i, j;
+	Time_t		cur_time = Time();
+	ShareInfo	*info, *next;
+
+	for (info=Top(); info; info=next) {
+		next = Next(info);
+		if (!*(_int64 *)&info->attachTime) continue;
+
+		int	clip_host = 0;
+		for (i=0; i < info->fileCnt; i++) {
+			for (j=0; j < info->hostCnt; j++) {
+				if (info->transStat[info->fileCnt * j + i] == TRANS_BUSY) break;
+				if (info->transStat[info->fileCnt * j + i] == TRANS_INIT) {
+					if (GET_MODE(info->fileInfo[i]->Attr()) != IPMSG_FILE_CLIPBOARD) break;
+					if (info->host[j]->hostStatus & IPMSG_CLIPBOARDOPT) {
+						clip_host++;
+					}
+				}
+			}
+			if (j != info->hostCnt) break;
+		}
+		if (i == info->fileCnt && j == info->hostCnt) {
+			if (clip_host > 0 && FileTime2UnixTime(&info->attachTime) + 1200 > cur_time) continue;
+			DestroyShare(info);
+		}
+	}
 }
 
 /* ShareDlg */
@@ -315,42 +376,36 @@ TShareDlg::TShareDlg(ShareMng *_shareMng, ShareInfo *_shareInfo, Cfg *_cfg, TWin
 
 TShareDlg::~TShareDlg()
 {
-	SendDlgItemMessage(FILE_LIST, LVM_DELETEALLITEMS, 0, 0);
+	shareListView.DeleteAllItems();
 }
 
 BOOL TShareDlg::EvCreate(LPARAM lParam)
 {
-	SendDlgItemMessage(FILE_LIST, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, parent->SendDlgItemMessage(HOST_LIST, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0) & ~LVS_EX_HEADERDRAGDROP);
+ 	shareListView.AttachWnd(GetDlgItem(FILE_LIST));
 
-	LV_COLUMN	lvC;
-	memset(&lvC, 0, sizeof(lvC));
-	lvC.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
+	char	*title[] = { GetLoadStrU8(IDS_FILENAME), GetLoadStrU8(IDS_SIZE), GetLoadStrU8(IDS_LOCATION), NULL };
+	int		size[]   = { 120, 70, 180 };
+	int		fmt[]    = { LVCFMT_LEFT, LVCFMT_RIGHT, LVCFMT_LEFT, LVCFMT_LEFT };
+	int		i;
 
-	char	*title[] = { FILENAME_MSGSTR, SIZE_MSGSTR, LOCATION_MSGSTR, NULL };
-	int	size[] = { 120, 70, 180 };
-	int	fmt[] = { LVCFMT_LEFT, LVCFMT_RIGHT, LVCFMT_LEFT, LVCFMT_LEFT };
-	for (lvC.iSubItem = 0; title[lvC.iSubItem]; lvC.iSubItem++)
-	{
-		lvC.pszText = title[lvC.iSubItem];
-		lvC.fmt = fmt[lvC.iSubItem];
-		lvC.cx = size[lvC.iSubItem];
-		SendDlgItemMessage(FILE_LIST, LVM_INSERTCOLUMN, lvC.iSubItem, (LPARAM)&lvC);
+	for (i=0; title[i]; i++) {
+		shareListView.InsertColumn(i, title[i], size[i], fmt[i]);
 	}
 
-	for (int cnt=0; cnt < shareInfo->fileCnt; cnt++)
-		AddList(cnt);
-
- 	shareListView.CreateByWnd(GetDlgItem(FILE_LIST));
+	for (i=0; i < shareInfo->fileCnt; i++) {
+		AddList(i);
+	}
 
 	if (rect.left == CW_USEDEFAULT)
 	{
 		GetWindowRect(&rect);
 		int xsize = rect.right - rect.left, ysize = rect.bottom - rect.top;
-		int	cx = ::GetSystemMetrics(SM_CXFULLSCREEN), cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
+		int	cx = ::GetSystemMetrics(SM_CXFULLSCREEN);
+		int	cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
 		int	x = (cx - xsize)/2;
 		int y = (cy - ysize)/2;
 
-		MoveWindow((x < 0) ? 0 : x % (cx - xsize), (y < 0) ? 0 : y % (cy - ysize), xsize, ysize, FALSE);
+		MoveWindow((x < 0) ? 0 : x, (y < 0) ? 0 : y, xsize, ysize, FALSE);
 	}
 	else
 		MoveWindow(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, FALSE);
@@ -360,49 +415,30 @@ BOOL TShareDlg::EvCreate(LPARAM lParam)
 	return	TRUE;
 }
 
-BOOL TShareDlg::AddList(int cnt)
+BOOL TShareDlg::AddList(int idx)
 {
-	LV_ITEM	lvi;
+	char	buf[MAX_BUF_EX];
 
-	memset(&lvi, 0, sizeof(lvi));
-	lvi.mask = LVIF_TEXT|LVIF_PARAM;
-	lvi.iItem = cnt;
-	lvi.pszText = LPSTR_TEXTCALLBACK;
-	lvi.lParam = 0;
-	return	SendDlgItemMessage(FILE_LIST, LVM_INSERTITEM, 0, (LPARAM)&lvi);
-}
+	ForcePathToFname(shareInfo->fileInfo[idx]->Fname(), buf);
+	shareListView.InsertItem(idx, buf);
 
-BOOL TShareDlg::DelList(int cnt)
-{
-	SendDlgItemMessage(FILE_LIST, LVM_DELETEITEM, cnt, 0);
-	shareMng->DelFileShare(shareInfo, cnt);
+	if (GET_MODE(shareInfo->fileInfo[idx]->Attr()) == IPMSG_FILE_DIR)
+		strcpy(buf, "(DIR)");
+	else
+		MakeSizeString(buf, shareInfo->fileInfo[idx]->Size(), MSS_SPACE);
+	shareListView.SetSubItem(idx, 1, buf);
+
+	PathToDir(shareInfo->fileInfo[idx]->Fname(), buf);
+	shareListView.SetSubItem(idx, 2, buf);
+
 	return	TRUE;
 }
 
-BOOL TShareDlg::EvNotify(UINT ctlID, NMHDR *pNmHdr)
+BOOL TShareDlg::DelList(int idx)
 {
-	if (pNmHdr->code == LVN_GETDISPINFO)
-	{
-		LV_DISPINFO	*dispInfo = (LV_DISPINFO *)pNmHdr;
-		const char	*fname = shareInfo->fileInfo[dispInfo->item.iItem]->Fname();
-
-		dispInfo->item.pszText = lvBuf;
-		switch (dispInfo->item.iSubItem) {
-		case 0: ForcePathToFname(fname, lvBuf);
-				break;
-		case 1: if (GET_MODE(shareInfo->fileInfo[dispInfo->item.iItem]->Attr()) == IPMSG_FILE_DIR)
-					strcpy(lvBuf, "(DIR)");
-				else
-					MakeSizeString(lvBuf, shareInfo->fileInfo[dispInfo->item.iItem]->Size(), MSS_SPACE);
-				break;
-		case 2: PathToDir(fname, lvBuf);
-				break;
-		default: return	FALSE;
-		}
-		return	TRUE;
-	}
-
-	return	FALSE;
+	shareListView.DeleteItem(idx);
+	shareMng->DelFileShare(shareInfo, idx);
+	return	TRUE;
 }
 
 BOOL TShareDlg::EvDropFiles(HDROP hDrop)
@@ -423,15 +459,15 @@ BOOL TShareDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 
 	case FILE_BUTTON:
 		{
-			int	cnt = shareInfo->fileCnt;
+			int	i = shareInfo->fileCnt;
 			if (FileAddDlg(this, shareMng, shareInfo, cfg))
-				for (cnt; cnt < shareInfo->fileCnt; cnt++)
-					AddList(cnt);
+				for (i; i < shareInfo->fileCnt; i++)
+					AddList(i);
 		}
 		break;
 
 	case FOLDER_BUTTON:
-		if (BrowseDirDlg(this, FOLDERATTACH_MSGSTR, cfg->lastOpenDir, cfg->lastOpenDir))
+		if (BrowseDirDlg(this, GetLoadStrU8(IDS_FOLDERATTACH), cfg->lastOpenDir, cfg->lastOpenDir))
 		{
 			if (shareMng->AddFileShare(shareInfo, cfg->lastOpenDir))
 			{
@@ -443,11 +479,11 @@ BOOL TShareDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 
 	case DEL_BUTTON:
 		{
-			for (int cnt=shareInfo->fileCnt-1; cnt >= 0; cnt--)
+			for (int i=shareInfo->fileCnt-1; i >= 0; i--)
 			{
-				if ((SendDlgItemMessage(FILE_LIST, LVM_GETITEMSTATE, cnt, LVIS_SELECTED) & LVIS_SELECTED) == 0)
-					continue;
-				DelList(cnt);
+				if (!shareListView.IsSelected(i)) continue;
+
+				DelList(i);
 			}
 		}
 		break;
@@ -459,22 +495,29 @@ BOOL TShareDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 
 BOOL TShareDlg::FileAddDlg(TDlg *dlg, ShareMng *shareMng, ShareInfo *shareInfo, Cfg *cfg)
 {
-	char	buf[MAX_BUF] = "", path[MAX_BUF];
+	int		bufsize = MAX_MULTI_PATH;
+	U8str	buf(bufsize);
+	U8str	path(bufsize);
 
-	if (OpenFileDlg(dlg, OpenFileDlg::MULTI_OPEN).Exec(buf, ADDFILE_MSGSTR, OPENFILEALL_MSGSTR, cfg->lastOpenDir) != TRUE)
+	OpenFileDlg	ofdlg(dlg, OpenFileDlg::MULTI_OPEN);
+
+	if (!ofdlg.Exec(buf.Buf(), bufsize, GetLoadStrU8(IDS_ADDFILE),
+			GetLoadStrAsFilterU8(IDS_OPENFILEALLFLTR), cfg->lastOpenDir)) {
 		return	FALSE;
+	}
 
 	cfg->WriteRegistry(CFG_GENERAL);
 
-	int		dirlen = strlen(cfg->lastOpenDir);
-	if (buf[dirlen])
-		return	shareMng->AddFileShare(shareInfo, buf);
+	int		dirlen = (int)strlen(cfg->lastOpenDir);
+	if (buf[dirlen]) {
+		return	shareMng->AddFileShare(shareInfo, buf.Buf());
+	}
 
-	for (char *fname=buf+dirlen+1; *fname; fname += strlen(fname) +1)
+	for (const char *fname=buf+dirlen+1; *fname; fname += strlen(fname) +1)
 	{
-		if (MakePath(path, buf, fname) >= MAX_PATH)
+		if (MakePath(path.Buf(), buf, fname) >= MAX_PATH_U8)
 			continue;
-		shareMng->AddFileShare(shareInfo, path);
+		shareMng->AddFileShare(shareInfo, path.Buf());
 	}
 	return	TRUE;
 }
@@ -484,46 +527,39 @@ TShareStatDlg::TShareStatDlg(ShareMng *_shareMng, Cfg *_cfg, TWin *_parent) : TD
 {
 	shareMng = _shareMng;
 	cfg = _cfg;
-	shareMng->RegistShareStatDlg(this);
+	shareMng->RegisterShareStatDlg(this);
 }
 
 TShareStatDlg::~TShareStatDlg()
 {
-	SendDlgItemMessage(SHARE_LIST, LVM_DELETEALLITEMS, 0, 0);
+	shareListView.DeleteAllItems();
 }
 
 BOOL TShareStatDlg::EvCreate(LPARAM lParam)
 {
-	SendDlgItemMessage(SHARE_LIST, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, SendDlgItemMessage(SHARE_LIST, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0) | LVS_EX_FULLROWSELECT | (cfg->GlidLineCheck ? LVS_EX_GRIDLINES : 0));
-
-	LV_COLUMN	lvC;
-	memset(&lvC, 0, sizeof(lvC));
-	lvC.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
-
 	char	*title[] = { "No", "Files", "Size", "All/done/trans", "Users", NULL };
-	int	size[] = { 30, 110, 70, 100, 100 };
-	int	fmt[] = { LVCFMT_RIGHT, LVCFMT_LEFT, LVCFMT_RIGHT, LVCFMT_RIGHT, LVCFMT_LEFT };
-	for (lvC.iSubItem = 0; title[lvC.iSubItem]; lvC.iSubItem++)
-	{
-		lvC.pszText = title[lvC.iSubItem];
-		lvC.fmt = fmt[lvC.iSubItem];
-		lvC.cx = size[lvC.iSubItem];
-		SendDlgItemMessage(SHARE_LIST, LVM_INSERTCOLUMN, lvC.iSubItem, (LPARAM)&lvC);
+	int		size[]   = { 30, 110, 70, 100, 100 };
+	int		fmt[]    = { LVCFMT_RIGHT, LVCFMT_LEFT, LVCFMT_RIGHT, LVCFMT_RIGHT, LVCFMT_LEFT };
+
+ 	shareListView.AttachWnd(GetDlgItem(SHARE_LIST));
+
+	for (int i=0; title[i]; i++) {
+		shareListView.InsertColumn(i, title[i], size[i], fmt[i]);
 	}
 
- 	shareListView.CreateByWnd(GetDlgItem(SHARE_LIST));
 	SetAllList();
 
-	SendDlgItemMessage(MODIFY_CHECK, BM_SETCHECK, (cfg->fileTransOpt & FT_STRICTDATE) ? TRUE : FALSE, 0);
+	CheckDlgButton(MODIFY_CHECK, (cfg->fileTransOpt & FT_STRICTDATE) ? 1 : 0);
 
 	if (rect.left == CW_USEDEFAULT)
 	{
 		GetWindowRect(&rect);
 		int xsize = rect.right - rect.left, ysize = rect.bottom - rect.top;
-		int	cx = ::GetSystemMetrics(SM_CXFULLSCREEN), cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
+		int	cx = ::GetSystemMetrics(SM_CXFULLSCREEN);
+		int	cy = ::GetSystemMetrics(SM_CYFULLSCREEN);
 		int	x = (cx - xsize)/2;
 		int y = (cy - ysize)/2;
-		MoveWindow((x < 0) ? 0 : x % (cx - xsize), (y < 0) ? 0 : y % (cy - ysize), xsize, ysize, FALSE);
+		MoveWindow((x < 0) ? 0 : x, (y < 0) ? 0 : y, xsize, ysize, FALSE);
 	}
 	else
 		MoveWindow(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, FALSE);
@@ -535,6 +571,8 @@ BOOL TShareStatDlg::EvCreate(LPARAM lParam)
 
 BOOL TShareStatDlg::Refresh(void)
 {
+	shareMng->Cleanup();
+
 	if (hWnd == NULL)
 		return	FALSE;
 	SetAllList();
@@ -543,89 +581,68 @@ BOOL TShareStatDlg::Refresh(void)
 
 BOOL TShareStatDlg::SetAllList(void)
 {
-	SendDlgItemMessage(SHARE_LIST, LVM_DELETEALLITEMS, 0, 0);
+	shareListView.DeleteAllItems();
 
-	LV_ITEM	lvi;
-	memset(&lvi, 0, sizeof(lvi));
-	int	cnt = 0;
+	int		i=0, j=0, len=0;
+	char	buf[MAX_BUF_EX];
 
 	for (ShareInfo *info=shareMng->Top(); info; info=shareMng->Next(info))
 	{
 		if (info->hostCnt == 0)
 			continue;
-		lvi.iItem = cnt++;
-		lvi.mask = LVIF_TEXT|LVIF_PARAM;
-		lvi.pszText = LPSTR_TEXTCALLBACK;
-		lvi.lParam = (LPARAM)info->packetNo;
-		SendDlgItemMessage(SHARE_LIST, LVM_INSERTITEM, 0, (LPARAM)&lvi);
+
+		sprintf(buf, "%d", i);
+		shareListView.InsertItem(i, buf);
+
+		len = 0;
+		*buf = 0;
+		for (j=0; j < info->fileCnt && len < sizeof(buf); j++) {
+			ForcePathToFname(info->fileInfo[j]->Fname(), buf + len);
+			strcat(buf + len, " ");
+			len += (int)strlen(buf + len);
+			if (len + MAX_PATH_U8 >= sizeof(buf)) break;
+		}
+		shareListView.SetSubItem(i, 1, buf);
+
+		ShareCntInfo	cntInfo;
+		shareMng->GetShareCntInfo(&cntInfo, info);
+		MakeSizeString(buf, cntInfo.totalSize, MSS_SPACE);
+		if (cntInfo.dirCnt) wsprintf(buf + strlen(buf), "/%dDIR", cntInfo.dirCnt);
+		shareListView.SetSubItem(i, 2, buf);
+
+		shareMng->GetShareCntInfo(&cntInfo, info);
+		wsprintf(buf, "%d / %d/ %d", cntInfo.fileCnt, cntInfo.doneCnt, cntInfo.transferCnt);
+		shareListView.SetSubItem(i, 3, buf);
+
+		len = 0;
+		*buf = 0;
+		for (j=0; j < info->hostCnt && len + 30 < sizeof(buf); j++) {
+			Host *host = info->host[j];
+			len += _snprintf(buf + len, sizeof(buf)-len-1, "%.14s(%.10s) ",
+							*host->nickName ? host->nickName : host->hostSub.userName,
+							host->hostSub.hostName);
+		}
+		shareListView.SetSubItem(i, 4, buf);
+		i++;
 	}
 	return	TRUE;
 }
 
-BOOL TShareStatDlg::DelList(int cnt)
+BOOL TShareStatDlg::DelList(int idx)
 {
-	LV_ITEM	lvi;
-	memset(&lvi, 0, sizeof(lvi));
-	lvi.iItem = cnt;
-	lvi.mask = LVIF_PARAM;
-	SendDlgItemMessage(SHARE_LIST, LVM_GETITEM, 0, (LPARAM)&lvi);
-	SendDlgItemMessage(SHARE_LIST, LVM_DELETEITEM, cnt, 0);
-	ShareInfo *info = shareMng->Search(lvi.lParam);
-
+	ShareInfo	*info = (ShareInfo *)shareListView.GetItemParam(idx);
 	if (info == NULL)
 		return	FALSE;
 
-	for (cnt=info->fileCnt * info->hostCnt -1; cnt >= 0; cnt--)
-		if (info->transStat[cnt] == ShareMng::TRANS_BUSY)
+	for (int i=info->fileCnt * info->hostCnt -1; i >= 0; i--) {
+		if (info->transStat[i] == ShareMng::TRANS_BUSY)
 			return	FALSE;
-
-	shareMng->DestroyShare(info);
-
-	return	TRUE;
-}
-
-BOOL TShareStatDlg::EvNotify(UINT ctlID, NMHDR *pNmHdr)
-{
-	if (pNmHdr->code == LVN_GETDISPINFO)
-	{
-		LV_DISPINFO	*dispInfo = (LV_DISPINFO *)pNmHdr;
-		ShareInfo		*info = shareMng->Search(dispInfo->item.lParam);
-		ShareCntInfo	cntInfo;
-		char			buf[MAX_BUF] = "";
-		int				len = 0, cnt;
-		dispInfo->item.pszText = lvBuf;
-
-		switch (dispInfo->item.iSubItem) {
-		case 0: wsprintf(lvBuf, "%d", dispInfo->item.iItem); break;
-		case 1:
-			for (cnt=0; cnt < info->fileCnt && len < sizeof(lvBuf); cnt++)
-			{
-				ForcePathToFname(info->fileInfo[cnt]->Fname(), lvBuf);
-				len += wsprintf(buf + len, "%s ", lvBuf);
-			}
-			strncpyz(lvBuf, buf, sizeof(lvBuf));
-			break;
-		case 2:
-			shareMng->GetShareCntInfo(&cntInfo, info);
-			MakeSizeString(lvBuf, cntInfo.totalSize, MSS_SPACE);
-			if (cntInfo.dirCnt)
-				wsprintf(lvBuf + strlen(lvBuf), "/%dDIR", cntInfo.dirCnt);
-			break;
-		case 3:
-			shareMng->GetShareCntInfo(&cntInfo, info);
-			wsprintf(lvBuf, "%d / %d/ %d", cntInfo.fileCnt, cntInfo.doneCnt, cntInfo.transferCnt);
-			break;
-		case 4:
-			for (cnt=0; cnt < info->hostCnt && len < sizeof(lvBuf); cnt++)
-				len += wsprintf(buf + len, "%.14s(%.10s) ", *info->host[cnt]->nickName ? info->host[cnt]->nickName : info->host[cnt]->hostSub.userName, info->host[cnt]->hostSub.hostName);
-			strncpyz(lvBuf, buf, sizeof(lvBuf));
-			break;
-		default: return	FALSE;
-		}
-		return	TRUE;
 	}
 
-	return	FALSE;
+	shareMng->DestroyShare(info);
+	shareListView.DeleteItem(idx);
+
+	return	TRUE;
 }
 
 BOOL TShareStatDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
@@ -636,11 +653,10 @@ BOOL TShareStatDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hWndCtl)
 	case IDCANCEL:	EndDialog(FALSE); break;
 	case DEL_BUTTON:
 		{
-			for (int cnt=SendDlgItemMessage(SHARE_LIST, LVM_GETITEMCOUNT, 0, 0)-1; cnt >= 0; cnt--)
+			for (int i=shareListView.GetItemCount()-1; i >= 0; i--)
 			{
-				if ((SendDlgItemMessage(SHARE_LIST, LVM_GETITEMSTATE, cnt, LVIS_SELECTED) & LVIS_SELECTED) == 0)
-					continue;
-				DelList(cnt);
+				if (!shareListView.IsSelected(i))	continue;
+				DelList(i);
 			}
 			SetAllList();
 		}
@@ -666,62 +682,96 @@ TSaveCommonDlg::TSaveCommonDlg(ShareInfo *_shareInfo, Cfg *_cfg, TWin *_parentWi
 	cfg = _cfg;
 	offset = 0;
 
-	for (int cnt=0; cnt < shareInfo->fileCnt; cnt++)
-		shareInfo->fileInfo[cnt]->SetSelected(FALSE);
+	for (int i=0; i < shareInfo->fileCnt; i++)
+		shareInfo->fileInfo[i]->SetSelected(FALSE);
 }
+
+BOOL GetParentDir(const char *srcfile, char *dir)
+{
+	char	path[MAX_BUF], *fname=NULL;
+
+	if (GetFullPathNameU8(srcfile, sizeof(path), path, &fname) == 0 || fname == NULL)
+		return	strcpy(dir, srcfile), FALSE;
+
+	if (fname - path > 3 || path[1] != ':')
+		*(fname - 1) = 0;
+	else
+		*fname = 0;		// C:\ „ÅÆÂ†¥Âêà
+
+	strcpy(dir, path);
+	return	TRUE;
+}
+
 
 int TSaveCommonDlg::Exec(void)
 {
 	modalFlg = TRUE;
 
-	char	fname[MAX_BUF];
-	FileInfo *fileInfo = shareInfo->fileInfo[offset];
+	char	fname[MAX_BUF], last_dir[MAX_BUF], buf[MAX_BUF], *ext;
 
-	// ç≈èIï€ë∂ÉfÉBÉåÉNÉgÉäÇ™ñ≥Ç≠Ç»Ç¡ÇƒÇ¢ÇÈèÍçáÅAè≠ÇµÇ≥Ç©ÇÃÇ⁄ÇÈ
-	for (int cnt=0; cnt < 5; cnt++)
-		if (*cfg->lastSaveDir && GetFileAttributes(cfg->lastSaveDir) == 0xffffffff)
-			if (PathToDir(cfg->lastSaveDir, cfg->lastSaveDir) == FALSE)
+	// ÊúÄÁµÇ‰øùÂ≠ò„Éá„Ç£„É¨„ÇØ„Éà„É™„ÅåÁÑ°„Åè„Å™„Å£„Å¶„ÅÑ„ÇãÂ†¥Âêà„ÄÅÂ∞ë„Åó„Åï„Åã„ÅÆ„Åº„Çã
+	for (int i=0; i < 5; i++) {
+		if (*cfg->lastSaveDir && GetFileAttributesU8(cfg->lastSaveDir) == 0xffffffff)
+			if (!PathToDir(cfg->lastSaveDir, cfg->lastSaveDir))
 				break;
-
-	if (*cfg->lastSaveDir && strstr(fileInfo->Fname(), ":\\") == NULL) {
-		MakePath(fname, cfg->lastSaveDir, fileInfo->Fname());
-		fname[MAX_PATH -1] = 0;
 	}
-	else strncpyz(fname, fileInfo->Fname(), MAX_PATH);
 
-	while (1)
-	{
-	// ÉtÉ@ÉCÉãÉ_ÉCÉAÉçÉO
-		TApp::AddWin(this);
-		BOOL	ret = OpenFileDlg(parentWin, OpenFileDlg::NODEREF_SAVE, (LPOFNHOOKPROC)TApp::WinProc).Exec(fname, SAVEFILE_MSGSTR, OPENFILEALL_MSGSTR, cfg->lastSaveDir);
-		TApp::DelWin(this);
+	strcpy(last_dir, *cfg->lastSaveDir ? cfg->lastSaveDir : ".");
+
+	while (1) {
+		FileInfo	*fileInfo = shareInfo->fileInfo[offset];
+
+		MakePath(fname, last_dir, fileInfo->Fname());
+
+	// „Éï„Ç°„Ç§„É´„ÉÄ„Ç§„Ç¢„É≠„Ç∞
+		TApp::GetApp()->AddWin(this);
+		OpenFileDlg	dlg(parentWin, OpenFileDlg::NODEREF_SAVE, (LPOFNHOOKPROC)TApp::WinProc);
+		BOOL ret = dlg.Exec(fname, sizeof(fname), GetLoadStrU8(IDS_SAVEFILE),
+							GetLoadStrAsFilterU8(IDS_OPENFILEALLFLTR), last_dir);
+		TApp::GetApp()->DelWin(this);
 		hWnd = NULL;
 
-		if (ret == FALSE)
+		if (!ret)
 			return	FALSE;
+
+	// shortcut „ÅÆÂ†¥Âêà„ÅØ„ÄÅ„É™„É≥„ÇØÂÖà„Å´È£õ„Å∂
+		if (!isLinkFile && (ext = strrchr(fname, '.')) && stricmp(ext, ".lnk") == 0) {
+			char	arg[MAX_BUF];
+			if (ReadLinkU8(fname, last_dir, arg)) {
+				if ((GetFileAttributesU8(last_dir) & FILE_ATTRIBUTE_DIRECTORY) == 0)
+					GetParentDir(last_dir, last_dir);
+			}
+			continue;
+		}
+
 		fileInfo = shareInfo->fileInfo[offset];
 
-		PathToDir(fname, cfg->lastSaveDir);
+		PathToDir(fname, last_dir);
 		ForcePathToFname(fname, fname);
-		fileInfo->SetFname(fname);
 		fileInfo->SetSelected(TRUE);
 
-	// è„èëÇ´ämîF
-		for (int cnt=0; cnt < shareInfo->fileCnt; cnt++)
+	// ‰∏äÊõ∏„ÅçÁ¢∫Ë™ç
+		for (int i=0; i < shareInfo->fileCnt; i++)
 		{
-			if (shareInfo->fileInfo[cnt]->IsSelected() == FALSE)
+			if (!shareInfo->fileInfo[i]->IsSelected())
 				continue;
-			MakePath(fname, cfg->lastSaveDir, shareInfo->fileInfo[cnt]->Fname());
-			if (::GetFileAttributes(fname) != 0xffffffff)
+			MakePath(buf, last_dir, offset == i ? fname : shareInfo->fileInfo[i]->Fname());
+			if (GetFileAttributesU8(buf) != 0xffffffff)
 			{
-				if ((ret = parentWin->MessageBox(OVERWRITE_MSGSTR, ATTENTION_MSGSTR, MB_OKCANCEL|MB_ICONEXCLAMATION) == IDOK) == FALSE)
-					for (int cnt2=0; cnt2 < shareInfo->fileCnt; cnt2++)
-						shareInfo->fileInfo[cnt2]->SetSelected(FALSE);
+				ret = parentWin->MessageBoxU8(GetLoadStrU8(IDS_OVERWRITE), GetLoadStrU8(IDS_ATTENTION), MB_OKCANCEL|MB_ICONEXCLAMATION);
+				if (ret != IDOK) {
+					for (int j=0; j < shareInfo->fileCnt; j++)
+						shareInfo->fileInfo[j]->SetSelected(FALSE);
+				}
 				break;
 			}
 		}
-		if (ret)
-			return	cfg->WriteRegistry(CFG_GENERAL), TRUE;
+		if (ret) {
+			fileInfo->SetFname(fname);
+			strcpy(cfg->lastSaveDir, last_dir);
+			cfg->WriteRegistry(CFG_GENERAL);
+			return	TRUE;
+		}
 	}
 	// not reach
 }
@@ -737,13 +787,13 @@ BOOL TSaveCommonDlg::EvCreate(LPARAM lParam)
 //	if (shareInfo->fileCnt == 1)
 //		return	TRUE;
 
-	if (::GetWindowRect(::GetDlgItem(pWnd, IDOK), &ok_rect) == FALSE)
+	if (!::GetWindowRect(::GetDlgItem(pWnd, IDOK), &ok_rect))
 		return	TRUE;
 
 	int	ok_xsize = ok_rect.right - ok_rect.left;
 	int	ok_ysize = ok_rect.bottom - ok_rect.top;
 
-// É{É^ÉìçÇÇ≥ÇÃ2î{ï™çLÇ∞ÇÈ
+// „Éú„Çø„É≥È´ò„Åï„ÅÆ2ÂÄçÂàÜÂ∫É„Åí„Çã
 	SetWindowLong(GWL_STYLE, GetWindowLong(GWL_STYLE)|WS_CLIPSIBLINGS);
 	::GetClientRect(pWnd, &cl_rect);
 	GetWindowRect(&rect);
@@ -752,13 +802,13 @@ BOOL TSaveCommonDlg::EvCreate(LPARAM lParam)
 
 	int		cx = 20, cy = ok_ysize;
 
-	::CreateWindow(STATIC_CLASS, "", WS_CHILD|WS_VISIBLE|SS_LEFT, cx, 0, rect.right, ok_ysize, hWnd, (HMENU)RESULT_STATIC, TApp::hI, NULL);
+	CreateWindowU8(STATIC_CLASS, "", WS_CHILD|WS_VISIBLE|SS_LEFT, cx, 0, rect.right, ok_ysize, hWnd, (HMENU)RESULT_STATIC, TApp::GetInstance(), NULL);
 
 	DWORD	flg = (shareInfo->fileCnt == 1 ? WS_DISABLED : 0)|WS_CHILD|WS_VISIBLE;
-	::CreateWindow(BUTTON_CLASS, PREVBUTTON_MSGSTR, flg | BS_PUSHBUTTON, cx, cy, ok_xsize, ok_ysize, hWnd, (HMENU)PRIOR_BUTTON, TApp::hI, NULL);
-	::CreateWindow(BUTTON_CLASS, NEXTBUTTON_MSGSTR, flg | BS_PUSHBUTTON, cx+=ok_xsize+20, cy, ok_xsize, ok_ysize, hWnd, (HMENU)NEXT_BUTTON, TApp::hI, NULL);
+	CreateWindowU8(BUTTON_CLASS, GetLoadStrU8(IDS_PREVBUTTON), flg | BS_PUSHBUTTON, cx, cy, ok_xsize, ok_ysize, hWnd, (HMENU)PRIOR_BUTTON, TApp::GetInstance(), NULL);
+	CreateWindowU8(BUTTON_CLASS, GetLoadStrU8(IDS_NEXTBUTTON), flg | BS_PUSHBUTTON, cx+=ok_xsize+20, cy, ok_xsize, ok_ysize, hWnd, (HMENU)NEXT_BUTTON, TApp::GetInstance(), NULL);
 
-	::CreateWindow(BUTTON_CLASS, "", WS_CHILD|WS_VISIBLE|BS_CHECKBOX, cx+=ok_xsize+20, cy, ok_xsize * 2, ok_ysize, hWnd, (HMENU)LUMP_CHECK, TApp::hI, NULL);
+	CreateWindowU8(BUTTON_CLASS, "", WS_CHILD|WS_VISIBLE|BS_CHECKBOX, cx+=ok_xsize+20, cy, ok_xsize * 2, ok_ysize, hWnd, (HMENU)LUMP_CHECK, TApp::GetInstance(), NULL);
 
 	HFONT	hDlgFont = (HFONT)::SendDlgItemMessage(pWnd, IDOK, WM_GETFONT, 0, 0L);
 	if (hDlgFont)
@@ -769,6 +819,8 @@ BOOL TSaveCommonDlg::EvCreate(LPARAM lParam)
 		SendDlgItemMessage(LUMP_CHECK, WM_SETFONT, (UINT)hDlgFont, 0L);
 	}
 	SetInfo();
+	if (cfg->LumpCheck)
+		LumpCheck();
 
 	return	TRUE;
 }
@@ -789,18 +841,22 @@ BOOL TSaveCommonDlg::EvCommand(WORD wNotifyCode, WORD wID, LPARAM hwndCtl)
 		return	TRUE;
 
 	case LUMP_CHECK:
-		{
-			BOOL checked = ::SendMessage((HWND)hwndCtl, BM_GETCHECK, 0, 0) == 0;
-			::SendMessage((HWND)hwndCtl, BM_SETCHECK, checked, 0);
-			for (int cnt=0; cnt < shareInfo->fileCnt; cnt++)
-				shareInfo->fileInfo[cnt]->SetSelected(checked);
-		}
+		LumpCheck();
 		return	TRUE;
 	}
 	return	FALSE;
 }
 
-BOOL TSaveCommonDlg::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
+BOOL TSaveCommonDlg::LumpCheck()
+{
+	cfg->LumpCheck = SendDlgItemMessage(LUMP_CHECK, BM_GETCHECK, 0, 0) == 0;
+	CheckDlgButton(LUMP_CHECK, cfg->LumpCheck);
+	for (int i=0; i < shareInfo->fileCnt; i++)
+		shareInfo->fileInfo[i]->SetSelected(cfg->LumpCheck);
+	return	TRUE;
+}
+
+BOOL TSaveCommonDlg::EventApp(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	return	FALSE;
 }
@@ -808,45 +864,59 @@ BOOL TSaveCommonDlg::EventUser(UINT uMsg, WPARAM wParam, LPARAM lParam)
 BOOL TSaveCommonDlg::SetInfo(void)
 {
 	char	buf[MAX_BUF], sizestr[MAX_LISTBUF];
+	Wstr	fname_w(shareInfo->fileInfo[offset]->Fname());
 
-	::SetDlgItemText(::GetParent(hWnd), 0x480, shareInfo->fileInfo[offset]->Fname());
+	::SetDlgItemTextW(::GetParent(hWnd), 0x480, fname_w.Buf());
 
 	if (GET_MODE(shareInfo->fileInfo[offset]->Attr()) == IPMSG_FILE_DIR)
-		strcpy(sizestr, DIRSAVE_MSGSTR);
+		strcpy(sizestr, GetLoadStrU8(IDS_DIRSAVE));
 	else
 		MakeSizeString(sizestr, shareInfo->fileInfo[offset]->Size());
 
-	wsprintf(buf, FILEINFO_MSGSTR, offset + 1, shareInfo->fileCnt, shareInfo->fileInfo[offset]->Fname(), sizestr);
-	SetDlgItemText(RESULT_STATIC, buf);
+	wsprintf(buf, GetLoadStrU8(IDS_FILEINFO), offset + 1, shareInfo->fileCnt, shareInfo->fileInfo[offset]->Fname(), sizestr);
+	SetDlgItemTextU8(RESULT_STATIC, buf);
 
 	_int64	total_size = 0;
-	for (int cnt=0; cnt < shareInfo->fileCnt; cnt++)
-		total_size += shareInfo->fileInfo[cnt]->Size();
+	for (int i=0; i < shareInfo->fileCnt; i++)
+		total_size += shareInfo->fileInfo[i]->Size();
 	MakeSizeString(sizestr, total_size);
-	wsprintf(buf, LUMPBUTTON_MSGSTR, sizestr, shareInfo->fileCnt);
-	SetDlgItemText(LUMP_CHECK, buf);
+	wsprintf(buf, GetLoadStrU8(IDS_LUMPBUTTON), sizestr, shareInfo->fileCnt);
+	SetDlgItemTextU8(LUMP_CHECK, buf);
+
+	const char	*ext = strrchr(shareInfo->fileInfo[offset]->Fname(), '.');
+	isLinkFile = (ext && stricmp(ext, ".lnk") == 0) ? TRUE : FALSE;
 
 	return	TRUE;
 }
 
 
 /*
-	ÉtÉ@ÉCÉãã§óLÅiìYïtÅjèÓïÒÇÉGÉìÉRÅ[Éh
+	„Éï„Ç°„Ç§„É´ÂÖ±ÊúâÔºàÊ∑ª‰ªòÔºâÊÉÖÂ†±„Çí„Ç®„É≥„Ç≥„Éº„Éâ
 */
-BOOL EncodeShareMsg(ShareInfo *info, char *buf, int bufsize)
+BOOL EncodeShareMsg(ShareInfo *info, char *buf, int bufsize, BOOL incMem)
 {
 	int		offset=0;
-	char	fname[MAX_PATH];
+	char	fname[MAX_PATH_U8];
+	int		id_base = 0;
+
+	TGenRandom(&id_base, sizeof(id_base));
+	id_base &= 0x3fffffff; // Ë≤†Êï∞„Å´„Å™„Çã„ÅÆ„ÇíÈò≤„Åê
 
 	*buf = 0;
-	for (int cnt=0; cnt < info->fileCnt; cnt++)
+	for (int i=0; i < info->fileCnt; i++)
 	{
-		ForcePathToFname(info->fileInfo[cnt]->Fname(), fname);
-		info->fileInfo[cnt]->SetId(cnt);
-		offset += wsprintf(buf + offset, (info->fileInfo[cnt]->Size() >> 32) ? "%d:%s:%x%08x:%x:%s" : "%d:%s:%x%x:%x:", cnt, fname, (int)(info->fileInfo[cnt]->Size() >> 32), (int)info->fileInfo[cnt]->Size(), info->fileInfo[cnt]->Mtime());
-//		if (GET_MODE(info->fileInfo[cnt]->Attr()) == IPMSG_FILE_DIR)
-			offset += wsprintf(buf + offset, "%x:", info->fileInfo[cnt]->Attr());
-		offset += wsprintf(buf + offset, "%c", FILELIST_SEPARATOR);
+		char	addition[100] = "";
+		if (GET_MODE(info->fileInfo[i]->Attr()) == IPMSG_FILE_CLIPBOARD) {
+			if (!incMem) continue;
+			sprintf(addition, ":%x=%x", IPMSG_FILE_CLIPBOARDPOS, info->fileInfo[i]->Pos());
+		}
+		ForcePathToFname(info->fileInfo[i]->Fname(), fname);
+		info->fileInfo[i]->SetId(id_base + i);
+
+		offset += sprintf(buf + offset, "%d:%s:%I64x:%x:%x%s:%c",
+					info->fileInfo[i]->Id(), fname, info->fileInfo[i]->Size(),
+					info->fileInfo[i]->Mtime(), info->fileInfo[i]->Attr(),
+					addition, FILELIST_SEPARATOR);
 
 		if (offset + MAX_BUF > bufsize)
 			break;
@@ -855,13 +925,13 @@ BOOL EncodeShareMsg(ShareInfo *info, char *buf, int bufsize)
 }
 
 /*
-	ÉtÉ@ÉCÉãñºÇ… ':' Çä‹ÇﬁèÍçáÅA"::" Ç∆ÉGÉXÉPÅ[ÉvÇ≥ÇÍÇƒÇ¢ÇÈÇ™ÅA
-	Windows Ç≈ÇÕégÇ¶Ç»Ç¢ÇÃÇ≈ÅA';' Ç…íuÇ´ä∑Ç¶ÇÈ
+	„Éï„Ç°„Ç§„É´Âêç„Å´ ':' „ÇíÂê´„ÇÄÂ†¥Âêà„ÄÅ"::" „Å®„Ç®„Çπ„Ç±„Éº„Éó„Åï„Çå„Å¶„ÅÑ„Çã„Åå„ÄÅ
+	Windows „Åß„ÅØ‰Ωø„Åà„Å™„ÅÑ„ÅÆ„Åß„ÄÅ';' „Å´ÁΩÆ„ÅçÊèõ„Åà„Çã
 */
 void ConvertShareMsgEscape(char *str)
 {
 	char	*ptr;
-	while ((ptr = strstr(str, "::")) != NULL)
+	while ((ptr = strstr(str, "::")))
 	{
 		*ptr++ = ';';
 		memmove(ptr, ptr + 1, strlen(ptr));
@@ -869,27 +939,29 @@ void ConvertShareMsgEscape(char *str)
 }
 
 /*
-	ÉtÉ@ÉCÉãã§óLÅiìYïtÅjèÓïÒÇÉfÉRÅ[Éh
-	íçà”ÅFîjâÛì«èoÇµÅBégópÇ™èIÇÌÇËéüëÊ FreeDecodeShareMsg ÇåƒÇ—èoÇ∑Ç±Ç∆ÅB
+	„Éï„Ç°„Ç§„É´ÂÖ±ÊúâÔºàÊ∑ª‰ªòÔºâÊÉÖÂ†±„Çí„Éá„Ç≥„Éº„Éâ
+	Ê≥®ÊÑèÔºöÁ†¥Â£äË™≠Âá∫„Åó„ÄÇ‰ΩøÁî®„ÅåÁµÇ„Çè„ÇäÊ¨°Á¨¨ FreeDecodeShareMsg „ÇíÂëº„Å≥Âá∫„Åô„Åì„Å®„ÄÇ
 */
-ShareInfo *DecodeShareMsg(char *buf)
+ShareInfo *DecodeShareMsg(char *buf, BOOL enable_clip)
 {
 	ShareInfo	*shareInfo = new ShareInfo;
 	FileInfo	*fileInfo = NULL;
 	char		*tok, *p, *p2, *p3;
 	char		*file = separate_token(buf, FILELIST_SEPARATOR, &p);
 
-	for (int cnt=0; file; cnt++, file=separate_token(NULL, FILELIST_SEPARATOR, &p))
+	for (int i=0; file; i++, file=separate_token(NULL, FILELIST_SEPARATOR, &p))
 	{
 		ConvertShareMsgEscape(file);	// "::" -> ';'
 		if ((tok = separate_token(file, ':', &p2)) == NULL)
 			break;
 		fileInfo = new FileInfo(atoi(tok));
 
-		if ((tok = separate_token(NULL, ':', &p2)) == NULL || strlen(tok) >= MAX_PATH)
+		if ((tok = separate_token(NULL, ':', &p2)) == NULL || strlen(tok) > MAX_FILENAME_U8)
 			break;
-		while ((p3 = strchr(tok, '?')) != NULL)	// UNICODE Ç‹Ç≈ÇÃébíË
+		while ((p3 = strchr(tok, '?')))	// UNICODE ÂØæÂøú„Åæ„Åß„ÅÆÊö´ÂÆö
 			*p3 = '_';
+		if (!IsValidFileName(tok))
+			break;
 		fileInfo->SetFname(tok);
 
 		if ((tok = separate_token(NULL, ':', &p2)) == NULL)
@@ -904,10 +976,23 @@ ShareInfo *DecodeShareMsg(char *buf)
 		{
 			fileInfo->SetAttr(strtoul(tok, 0, 16));
 			u_int	attr_type = GET_MODE(fileInfo->Attr());
-			if (attr_type != IPMSG_FILE_DIR && attr_type != IPMSG_FILE_REGULAR)
+			if (attr_type != IPMSG_FILE_DIR &&
+				attr_type != IPMSG_FILE_REGULAR &&
+				(!enable_clip || attr_type != IPMSG_FILE_CLIPBOARD))
 			{
 				delete fileInfo;
+				fileInfo = NULL;
 				continue;
+			}
+			if (attr_type == IPMSG_FILE_CLIPBOARD) {
+				if ((tok = separate_token(NULL, ':', &p2))) {
+					if (strtoul(tok, 0, 16) == IPMSG_FILE_CLIPBOARDPOS) {
+						if (separate_token(tok, '=', &p3) &&
+							(tok = separate_token(NULL, '=', &p3))) {
+							fileInfo->SetPos(strtoul(tok, 0, 16));
+						}
+					}
+				}
 			}
 		}
 		else fileInfo->SetAttr(IPMSG_FILE_REGULAR);
@@ -918,7 +1003,7 @@ ShareInfo *DecodeShareMsg(char *buf)
 		shareInfo->fileInfo[shareInfo->fileCnt++] = fileInfo;
 		fileInfo = NULL;
 	}
-	if (fileInfo)	// ÉfÉRÅ[ÉhíÜÇ…î≤ÇØÇΩ
+	if (fileInfo)	// „Éá„Ç≥„Éº„Éâ‰∏≠„Å´Êäú„Åë„Åü
 		delete fileInfo;
 
 	if (shareInfo->fileCnt <= 0)
@@ -930,7 +1015,7 @@ ShareInfo *DecodeShareMsg(char *buf)
 }
 
 /*
-	ÉfÉRÅ[ÉhèÓïÒÇÃäJï˙
+	„Éá„Ç≥„Éº„ÉâÊÉÖÂ†±„ÅÆÈñãÊîæ
 */
 BOOL FreeDecodeShareMsg(ShareInfo *info)
 {
@@ -942,7 +1027,7 @@ BOOL FreeDecodeShareMsg(ShareInfo *info)
 }
 
 /*
-	ÉfÉRÅ[ÉhèÓïÒì‡ÇÃÉtÉ@ÉCÉãèÓïÒçÌèú
+	„Éá„Ç≥„Éº„ÉâÊÉÖÂ†±ÂÜÖ„ÅÆ„Éï„Ç°„Ç§„É´ÊÉÖÂ†±ÂâäÈô§
 */
 BOOL FreeDecodeShareMsgFile(ShareInfo *info, int index)
 {
@@ -960,6 +1045,7 @@ ShareInfo::ShareInfo(int _packetNo)
 	transStat = NULL;
 	fileInfo = NULL;
 	hostCnt = fileCnt = 0;
+	memset(&attachTime, 0, sizeof(attachTime));
 }
 
 void ShareInfo::LinkList(ShareInfo *top)
@@ -968,29 +1054,5 @@ void ShareInfo::LinkList(ShareInfo *top)
 	next = top;
 	top->prior->next = this;
 	top->prior = this;
-}
-
-BOOL GetFileInfomation(const char *path, WIN32_FIND_DATA *fdata)
-{
-	HANDLE	fh;
-
-	if ((fh = ::FindFirstFile(path, fdata)) != INVALID_HANDLE_VALUE)
-	{
-		::FindClose(fh);
-		return	TRUE;
-	}
-
-	memset(fdata, 0, sizeof(WIN32_FIND_DATA));
-
-	if ((fh = ::CreateFile(path, GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0)) != INVALID_HANDLE_VALUE)
-	{
-		BY_HANDLE_FILE_INFORMATION	info;
-		BOOL	info_ret = ::GetFileInformationByHandle(fh, &info);
-		::CloseHandle(fh);
-		if (info_ret)
-			return	memcpy(fdata, &info, (char *)&info.dwVolumeSerialNumber - (char *)&info), TRUE;
-	}
-
-	return	(fdata->dwFileAttributes = ::GetFileAttributes(path)) == 0xffffffff ? FALSE : TRUE;
 }
 
